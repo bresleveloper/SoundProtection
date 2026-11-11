@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 468 828" width="468" height="828" role="img" aria-labelledby="dt dd">
+  <title id="dt">The sound path Ariel wants (his sketch of 2026-11-10, redrawn)</title>
+  <desc id="dd">Your sketch redrawn as a flow. Apps, Zoom and YouTube feed the Windows sound engine. Its live output lists each sound's level: sound a 28 dB, sound b 35 dB, sound c 17 dB. The tray app, on with the cap at 25 dB, processes them: sound a is decreased by 12%, sound b by 34%, and sound c is not changed. The processed sound goes back into the sound engine, then the driver, then the Windows volume slider, which stays dynamic, then the headphones, which stay static at max.</desc>
+  <style><![CDATA[
+@import url("https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Barlow+Semi+Condensed:wght@700&display=swap");
+svg {
+  --canvas: #FFFFFF;
+  --surface: #FFFFFF;
+  --ink: #142029;
+  --muted: #56646F;
+  --box-stroke: #8C9AA5;
+  --accent: #3446C2;
+  --accent-soft: #E3E7FB;
+  --ok-fg: #8A4A00;
+  --ok-bg: #FBE7CB;
+  --font-display: "Barlow Semi Condensed", "Segoe UI Semibold", "Arial Narrow", sans-serif;
+  --font-body: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  svg {
+    --canvas: #162029;
+    --surface: #162029;
+    --ink: #E5ECF1;
+    --muted: #9BA9B4;
+    --box-stroke: #6C7B87;
+    --accent: #93A0FF;
+    --accent-soft: #232B57;
+    --ok-fg: #F4B862;
+    --ok-bg: #3A2A13;
+  }
+}
+svg text { font-family: var(--font-body); }
+.d-canvas { fill: var(--canvas, transparent); }
+.d-box { fill: var(--surface); stroke: var(--box-stroke); stroke-width: 2; }
+.d-data { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 2; }
+.d-tray { fill: var(--ok-bg); stroke: var(--ok-fg); stroke-width: 2; }
+.d-t { font-family: var(--font-display); font-weight: 700; font-size: 19px; fill: var(--ink); }
+.d-d { font-size: 16px; fill: var(--ink); }
+.d-m { font-size: 16px; fill: var(--muted); }
+.d-dn { font-size: 16px; font-weight: 700; fill: var(--accent); }
+.d-acc { fill: var(--accent); }
+.d-ora { fill: var(--ok-fg); }
+.d-b { font-weight: 700; }
+.d-cap { font-family: var(--font-display); font-weight: 700; font-size: 26px; }
+.d-flow { fill: none; stroke: var(--ink); stroke-width: 2.5; stroke-linejoin: round; }
+.d-head { fill: var(--ink); }
+.d-ico { fill: none; stroke: var(--accent); stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.d-ico-m { stroke: var(--muted); }
+.d-ico-i { stroke: var(--ink); stroke-width: 1.8; }
+.d-toggle { fill: var(--ok-fg); }
+.d-knob { fill: var(--ok-bg); }
+.d-track { fill: none; stroke: var(--box-stroke); stroke-width: 3; stroke-linecap: round; }
+.d-slide-knob { fill: var(--surface); stroke: var(--ink); stroke-width: 2.2; }
+  ]]></style>
+  <rect class="d-canvas" width="468" height="828"/>
+  <defs>
+    <marker id="d-arrow" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="12" markerHeight="12" markerUnits="userSpaceOnUse" orient="auto">
+      <path class="d-head" d="M1 1 L11 6 L1 11 Z"/>
+    </marker>
+  </defs>
+
+  <!-- Windows' own path, left lane -->
+  <rect class="d-box" x="6" y="6" width="214" height="46" rx="10"/>
+  <text class="d-t" x="113" y="35" text-anchor="middle">Apps, Zoom, YouTube</text>
+  <path class="d-flow" d="M113 52 V82" marker-end="url(#d-arrow)"/>
+
+  <rect class="d-box" x="6" y="82" width="214" height="46" rx="10"/>
+  <text class="d-t" x="113" y="111" text-anchor="middle">Sound engine</text>
+
+  <!-- engine out to the live output -->
+  <path class="d-flow" d="M113 128 V150 Q113 160 123 160 H244" marker-end="url(#d-arrow)"/>
+
+  <!-- live output (blue) -->
+  <rect class="d-data" x="246" y="140" width="216" height="120" rx="10"/>
+  <text class="d-t d-acc" x="262" y="166">Live output</text>
+  <text class="d-d" x="262" y="192">sound a = 28 dB</text>
+  <text class="d-d" x="262" y="216">sound b = 35 dB</text>
+  <text class="d-d" x="262" y="240">sound c = 17 dB</text>
+  <path class="d-flow" d="M354 260 V290" marker-end="url(#d-arrow)"/>
+
+  <!-- tray app (orange) -->
+  <rect class="d-tray" x="246" y="290" width="216" height="92" rx="10"/>
+  <text class="d-t d-ora" x="262" y="318">Tray app</text>
+  <rect class="d-toggle" x="372" y="300" width="38" height="22" rx="11"/>
+  <circle class="d-knob" cx="399" cy="311" r="8"/>
+  <text class="d-d d-ora d-b" x="418" y="317">on</text>
+  <text class="d-cap d-ora" x="262" y="360">cap = 25 dB</text>
+  <path class="d-flow" d="M354 382 V412" marker-end="url(#d-arrow)"/>
+
+  <!-- process live output (blue) -->
+  <rect class="d-data" x="246" y="412" width="216" height="196" rx="10"/>
+  <text class="d-t d-acc" x="262" y="438">Process live output</text>
+
+  <text class="d-d" x="262" y="464">sound a = 28 dB</text>
+  <path class="d-ico" d="M268 474 V486 M262 481 L268 487 L274 481"/>
+  <text class="d-dn" x="284" y="486">decrease by 12%</text>
+
+  <text class="d-d" x="262" y="512">sound b = 35 dB</text>
+  <path class="d-ico" d="M268 522 V534 M262 529 L268 535 L274 529"/>
+  <text class="d-dn" x="284" y="534">decrease by 34%</text>
+
+  <text class="d-d" x="262" y="560">sound c = 17 dB</text>
+  <path class="d-ico d-ico-m" d="M262 573 H274 M262 579 H274"/>
+  <text class="d-m" x="284" y="582">no change</text>
+
+  <!-- processed sound back into the engine -->
+  <path class="d-flow" d="M245 432 H123 Q113 432 113 442 V471" marker-end="url(#d-arrow)"/>
+
+  <!-- Windows' own path continues, left lane -->
+  <rect class="d-box" x="6" y="472" width="214" height="46" rx="10"/>
+  <text class="d-t" x="113" y="501" text-anchor="middle">Sound engine</text>
+  <path class="d-flow" d="M113 518 V548" marker-end="url(#d-arrow)"/>
+
+  <rect class="d-box" x="6" y="548" width="214" height="46" rx="10"/>
+  <text class="d-t" x="113" y="577" text-anchor="middle">Driver</text>
+  <path class="d-flow" d="M113 594 V624" marker-end="url(#d-arrow)"/>
+
+  <rect class="d-box" x="6" y="624" width="214" height="108" rx="10"/>
+  <text class="d-t" x="22" y="652">Volume slider</text>
+  <text class="d-t" x="22" y="674">in Windows</text>
+  <path class="d-track" d="M148 646 H202"/>
+  <circle class="d-slide-knob" cx="178" cy="646" r="7"/>
+  <path class="d-ico d-ico-i" d="M164 662 H192 M168 658 L163 662 L168 666 M188 658 L193 662 L188 666"/>
+  <text class="d-m" x="22" y="700">stays dynamic,</text>
+  <text class="d-m" x="22" y="722">you can play with it</text>
+  <path class="d-flow" d="M113 732 V762" marker-end="url(#d-arrow)"/>
+
+  <rect class="d-box" x="6" y="762" width="214" height="60" rx="10"/>
+  <text class="d-t" x="22" y="790">Headphones</text>
+  <text class="d-m" x="22" y="812">stay static, at max</text>
+</svg>

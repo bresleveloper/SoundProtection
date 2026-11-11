@@ -1,0 +1,486 @@
+<meta charset="utf-8">
+<title>Sound Protection Game Plan</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=Barlow+Semi+Condensed:wght@600;700&display=swap">
+<style>
+  /* Layout: one calm reading column. The sound path (Ariel's sketch) comes first, then the numbered route from today to protected. */
+  :root {
+    --bg: #F2F5F6;
+    --surface: #FFFFFF;
+    --ink: #142029;
+    --muted: #56646F;
+    --rule: #D3DBE0;
+    --box-stroke: #8C9AA5;
+    --accent: #3446C2;
+    --accent-soft: #E3E7FB;
+    --on-accent: #FFFFFF;
+    --hot: #C9372C;
+    --loud: #2B3C49;
+    --quiet: #8796A2;
+    --done-fg: #54616B;
+    --done-bg: #E4E9EC;
+    --safe-fg: #14683F;
+    --safe-bg: #D9F0E3;
+    --ok-fg: #8A4A00;
+    --ok-bg: #FBE7CB;
+    --ok-soft: #FFF6EA;
+    --font-display: "Barlow Semi Condensed", "Segoe UI Semibold", "Arial Narrow", sans-serif;
+    --font-body: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0E1419;
+      --surface: #162029;
+      --ink: #E5ECF1;
+      --muted: #9BA9B4;
+      --rule: #27333D;
+      --box-stroke: #6C7B87;
+      --accent: #93A0FF;
+      --accent-soft: #232B57;
+      --on-accent: #0D1233;
+      --hot: #FF7A6E;
+      --loud: #C7D2DB;
+      --quiet: #6F7E8A;
+      --done-fg: #AAB6BF;
+      --done-bg: #24303A;
+      --safe-fg: #72D8A6;
+      --safe-bg: #12352A;
+      --ok-fg: #F4B862;
+      --ok-bg: #3A2A13;
+      --ok-soft: #221B12;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0E1419;
+    --surface: #162029;
+    --ink: #E5ECF1;
+    --muted: #9BA9B4;
+    --rule: #27333D;
+    --box-stroke: #6C7B87;
+    --accent: #93A0FF;
+    --accent-soft: #232B57;
+    --on-accent: #0D1233;
+    --hot: #FF7A6E;
+    --loud: #C7D2DB;
+    --quiet: #6F7E8A;
+    --done-fg: #AAB6BF;
+    --done-bg: #24303A;
+    --safe-fg: #72D8A6;
+    --safe-bg: #12352A;
+    --ok-fg: #F4B862;
+    --ok-bg: #3A2A13;
+    --ok-soft: #221B12;
+    color-scheme: dark;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 1.1875rem;
+    line-height: 1.55;
+  }
+  .page {
+    max-width: 66rem;
+    margin: 0 auto;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 40px 64px;
+    display: grid;
+    gap: 64px;
+  }
+  .page > * { min-width: 0; }
+
+  h1, h2 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    line-height: 1.05;
+    text-wrap: balance;
+    margin: 0;
+  }
+  h1 { font-size: clamp(2.4rem, 1.6rem + 3vw, 3.6rem); letter-spacing: -0.01em; }
+  h2 { font-size: clamp(1.75rem, 1.4rem + 1.2vw, 2.25rem); }
+  h3 { margin: 0; }
+  p { margin: 0; }
+
+  .eyebrow {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 0.95rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  header { display: grid; gap: 14px; }
+  .lead { font-size: 1.3rem; max-width: 38em; }
+
+  section { display: grid; gap: 22px; }
+  .intro { max-width: 40em; color: var(--muted); }
+
+  figure { margin: 0; }
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 14px;
+    padding: 18px;
+    min-width: 0;
+  }
+
+  /* The sound path: Ariel's sketch, redrawn */
+  .flow {
+    display: grid;
+    grid-template-columns: minmax(0, 33rem) minmax(0, 1fr);
+    gap: 28px 48px;
+    align-items: start;
+  }
+  .flow svg { display: block; width: 100%; height: auto; }
+  .flow-notes { display: grid; gap: 28px; align-content: start; max-width: 30em; }
+  .note-block { display: grid; gap: 14px; }
+  .note-block h3 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 1.05rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .legend, .does { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+  .legend li { display: grid; grid-template-columns: 1.6rem minmax(0, 1fr); gap: 12px; align-items: start; }
+  .sw { display: block; width: 1.6rem; height: 1.15rem; margin-top: 0.3rem; border-radius: 5px; border: 2px solid; }
+  .sw-win { background: var(--surface); border-color: var(--box-stroke); }
+  .sw-live { background: var(--accent-soft); border-color: var(--accent); }
+  .sw-tray { background: var(--ok-bg); border-color: var(--ok-fg); }
+  .does li { padding-left: 16px; border-left: 4px solid var(--accent); }
+
+  /* Diagram marks, themed from the tokens above */
+  svg text { font-family: var(--font-body); }
+  .d-canvas { fill: var(--canvas, transparent); }
+  .d-box { fill: var(--surface); stroke: var(--box-stroke); stroke-width: 2; }
+  .d-data { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 2; }
+  .d-tray { fill: var(--ok-bg); stroke: var(--ok-fg); stroke-width: 2; }
+  .d-t { font-family: var(--font-display); font-weight: 700; font-size: 19px; fill: var(--ink); }
+  .d-d { font-size: 16px; fill: var(--ink); }
+  .d-m { font-size: 16px; fill: var(--muted); }
+  .d-dn { font-size: 16px; font-weight: 700; fill: var(--accent); }
+  .d-acc { fill: var(--accent); }
+  .d-ora { fill: var(--ok-fg); }
+  .d-b { font-weight: 700; }
+  .d-cap { font-family: var(--font-display); font-weight: 700; font-size: 26px; }
+  .d-flow { fill: none; stroke: var(--ink); stroke-width: 2.5; stroke-linejoin: round; }
+  .d-head { fill: var(--ink); }
+  .d-ico { fill: none; stroke: var(--accent); stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+  .d-ico-m { stroke: var(--muted); }
+  .d-ico-i { stroke: var(--ink); stroke-width: 1.8; }
+  .d-toggle { fill: var(--ok-fg); }
+  .d-knob { fill: var(--ok-bg); }
+  .d-track { fill: none; stroke: var(--box-stroke); stroke-width: 3; stroke-linecap: round; }
+  .d-slide-knob { fill: var(--surface); stroke: var(--ink); stroke-width: 2.2; }
+
+  /* The game plan */
+  .key { display: flex; flex-wrap: wrap; gap: 10px 12px; align-items: center; }
+  .key-note { color: var(--muted); max-width: 40em; }
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.9rem;
+    font-weight: 700;
+    line-height: 1.3;
+    padding: 4px 12px 4px 10px;
+    border-radius: 999px;
+    width: fit-content;
+  }
+  .tag::before { content: ""; width: 0.6em; height: 0.6em; flex: none; background: currentColor; }
+  .t-done { color: var(--done-fg); background: var(--done-bg); }
+  .t-done::before { content: "\2713"; width: auto; height: auto; background: none; font-size: 1em; }
+  .t-safe { color: var(--safe-fg); background: var(--safe-bg); }
+  .t-safe::before { border-radius: 50%; }
+  .t-ok { color: var(--ok-fg); background: var(--ok-bg); }
+  .t-ok::before { transform: rotate(45deg); width: 0.55em; height: 0.55em; }
+
+  .steps { list-style: none; margin: 0; padding: 0; display: grid; }
+  .step {
+    display: grid;
+    grid-template-columns: 2.9rem minmax(0, 1fr);
+    gap: 16px;
+    padding: 22px 12px;
+    border-top: 1px solid var(--rule);
+  }
+  .step:first-child { border-top: 0; }
+  .num {
+    width: 2.6rem;
+    height: 2.6rem;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 1.4rem;
+    border: 2px solid var(--box-stroke);
+    background: var(--surface);
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+  }
+  .step-body { display: grid; gap: 8px; min-width: 0; justify-items: start; }
+  .step h3 { font-size: 1.25rem; line-height: 1.3; text-wrap: balance; }
+  .step p { max-width: 40em; }
+  .is-done .num { background: var(--done-bg); border-color: var(--done-bg); color: var(--done-fg); }
+  .is-done h3 { color: var(--done-fg); }
+  .is-here {
+    background: var(--accent-soft);
+    border-radius: 14px;
+    border-top-color: transparent;
+    box-shadow: inset 0 0 0 2px var(--accent);
+  }
+  .is-here + .step { border-top-color: transparent; }
+  .is-here .num { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  .here {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 0.95rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--on-accent);
+    background: var(--accent);
+    padding: 3px 12px;
+    border-radius: 999px;
+  }
+  .is-maybe .step-body { border-left: 3px dashed var(--ok-fg); padding-left: 14px; }
+  .change {
+    font-size: 1.05rem;
+    background: var(--ok-soft);
+    border: 1px solid var(--ok-bg);
+    border-radius: 10px;
+    padding: 8px 14px;
+  }
+  .change b { color: var(--ok-fg); }
+  .nw { white-space: nowrap; }
+
+  .fallback { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; max-width: 44em; }
+  .fallback li { padding-left: 16px; border-left: 4px solid var(--rule); }
+  .fallback b { font-family: var(--font-display); font-size: 1.2rem; letter-spacing: 0.01em; }
+
+  footer { color: var(--muted); font-size: 1rem; border-top: 1px solid var(--rule); padding-top: 18px; }
+  code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 0.92em; }
+
+  @media (max-width: 760px) {
+    body { font-size: 1.125rem; }
+    .page { gap: 52px; padding-block: 28px 48px; }
+    .lead { font-size: 1.2rem; }
+    .step { grid-template-columns: 2.5rem minmax(0, 1fr); gap: 12px; padding: 20px 10px; }
+    .num { width: 2.3rem; height: 2.3rem; font-size: 1.25rem; }
+    .panel { padding: 14px 10px 14px; }
+  }
+  @media (max-width: 900px) {
+    .flow { grid-template-columns: minmax(0, 1fr); }
+    .flow .panel { max-width: 34rem; }
+  }
+</style>
+
+<main class="page">
+  <header>
+    <p class="eyebrow">Sound Protection &middot; plan for Ariel &middot; 10 Nov 2026</p>
+    <h1>Sound Protection game plan</h1>
+    <p class="lead">Sound Protection will hold loud Zoom and YouTube sound under the cap you set. Your sketch comes first, then the steps in order.</p>
+  </header>
+
+  <section aria-labelledby="flow">
+    <h2 id="flow">The sound path you want</h2>
+    <p class="intro">Your sketch, redrawn. The numbers are your example, with the cap at 25 dB.</p>
+    <figure class="flow">
+      <div class="panel">
+        <svg viewBox="0 0 468 828" role="img" aria-label="Your sketch redrawn as a flow. Apps, Zoom and YouTube feed the Windows sound engine. Its live output lists each sound's level: sound a 28 dB, sound b 35 dB, sound c 17 dB. The tray app, on with the cap at 25 dB, processes them: sound a is decreased by 12%, sound b by 34%, and sound c is not changed. The processed sound goes back into the sound engine, then the driver, then the Windows volume slider, which stays dynamic, then the headphones, which stay static at max.">
+      <defs>
+        <marker id="d-arrow" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="12" markerHeight="12" markerUnits="userSpaceOnUse" orient="auto">
+          <path class="d-head" d="M1 1 L11 6 L1 11 Z"/>
+        </marker>
+      </defs>
+    
+      <!-- Windows' own path, left lane -->
+      <rect class="d-box" x="6" y="6" width="214" height="46" rx="10"/>
+      <text class="d-t" x="113" y="35" text-anchor="middle">Apps, Zoom, YouTube</text>
+      <path class="d-flow" d="M113 52 V82" marker-end="url(#d-arrow)"/>
+    
+      <rect class="d-box" x="6" y="82" width="214" height="46" rx="10"/>
+      <text class="d-t" x="113" y="111" text-anchor="middle">Sound engine</text>
+    
+      <!-- engine out to the live output -->
+      <path class="d-flow" d="M113 128 V150 Q113 160 123 160 H244" marker-end="url(#d-arrow)"/>
+    
+      <!-- live output (blue) -->
+      <rect class="d-data" x="246" y="140" width="216" height="120" rx="10"/>
+      <text class="d-t d-acc" x="262" y="166">Live output</text>
+      <text class="d-d" x="262" y="192">sound a = 28 dB</text>
+      <text class="d-d" x="262" y="216">sound b = 35 dB</text>
+      <text class="d-d" x="262" y="240">sound c = 17 dB</text>
+      <path class="d-flow" d="M354 260 V290" marker-end="url(#d-arrow)"/>
+    
+      <!-- tray app (orange) -->
+      <rect class="d-tray" x="246" y="290" width="216" height="92" rx="10"/>
+      <text class="d-t d-ora" x="262" y="318">Tray app</text>
+      <rect class="d-toggle" x="372" y="300" width="38" height="22" rx="11"/>
+      <circle class="d-knob" cx="399" cy="311" r="8"/>
+      <text class="d-d d-ora d-b" x="418" y="317">on</text>
+      <text class="d-cap d-ora" x="262" y="360">cap = 25 dB</text>
+      <path class="d-flow" d="M354 382 V412" marker-end="url(#d-arrow)"/>
+    
+      <!-- process live output (blue) -->
+      <rect class="d-data" x="246" y="412" width="216" height="196" rx="10"/>
+      <text class="d-t d-acc" x="262" y="438">Process live output</text>
+    
+      <text class="d-d" x="262" y="464">sound a = 28 dB</text>
+      <path class="d-ico" d="M268 474 V486 M262 481 L268 487 L274 481"/>
+      <text class="d-dn" x="284" y="486">decrease by 12%</text>
+    
+      <text class="d-d" x="262" y="512">sound b = 35 dB</text>
+      <path class="d-ico" d="M268 522 V534 M262 529 L268 535 L274 529"/>
+      <text class="d-dn" x="284" y="534">decrease by 34%</text>
+    
+      <text class="d-d" x="262" y="560">sound c = 17 dB</text>
+      <path class="d-ico d-ico-m" d="M262 573 H274 M262 579 H274"/>
+      <text class="d-m" x="284" y="582">no change</text>
+    
+      <!-- processed sound back into the engine -->
+      <path class="d-flow" d="M245 432 H123 Q113 432 113 442 V471" marker-end="url(#d-arrow)"/>
+    
+      <!-- Windows' own path continues, left lane -->
+      <rect class="d-box" x="6" y="472" width="214" height="46" rx="10"/>
+      <text class="d-t" x="113" y="501" text-anchor="middle">Sound engine</text>
+      <path class="d-flow" d="M113 518 V548" marker-end="url(#d-arrow)"/>
+    
+      <rect class="d-box" x="6" y="548" width="214" height="46" rx="10"/>
+      <text class="d-t" x="113" y="577" text-anchor="middle">Driver</text>
+      <path class="d-flow" d="M113 594 V624" marker-end="url(#d-arrow)"/>
+    
+      <rect class="d-box" x="6" y="624" width="214" height="108" rx="10"/>
+      <text class="d-t" x="22" y="652">Volume slider</text>
+      <text class="d-t" x="22" y="674">in Windows</text>
+      <path class="d-track" d="M148 646 H202"/>
+      <circle class="d-slide-knob" cx="178" cy="646" r="7"/>
+      <path class="d-ico d-ico-i" d="M164 662 H192 M168 658 L163 662 L168 666 M188 658 L193 662 L188 666"/>
+      <text class="d-m" x="22" y="700">stays dynamic,</text>
+      <text class="d-m" x="22" y="722">you can play with it</text>
+      <path class="d-flow" d="M113 732 V762" marker-end="url(#d-arrow)"/>
+    
+      <rect class="d-box" x="6" y="762" width="214" height="60" rx="10"/>
+      <text class="d-t" x="22" y="790">Headphones</text>
+      <text class="d-m" x="22" y="812">stay static, at max</text>
+        </svg>
+      </div>
+      <figcaption class="flow-notes">
+        <div class="note-block">
+          <h3>How to read it</h3>
+          <ul class="legend">
+            <li><span class="sw sw-win" aria-hidden="true"></span><span><b>Windows&rsquo; own path.</b> Sound goes down it, following the arrows.</span></li>
+            <li><span class="sw sw-live" aria-hidden="true"></span><span><b>Live levels.</b> The level of each sound, in dB.</span></li>
+            <li><span class="sw sw-tray" aria-hidden="true"></span><span><b>Tray app.</b> Switched on, with your cap.</span></li>
+          </ul>
+        </div>
+        <div class="note-block">
+          <h3>What it does</h3>
+          <ul class="does">
+            <li>A sound over the cap (a and b) is turned down.</li>
+            <li>A sound under the cap (c) is left alone.</li>
+            <li>The result goes back into the sound engine, then on to the driver.</li>
+            <li>The Windows volume slider stays dynamic, so you can play with it. The headphones stay static at max.</li>
+          </ul>
+        </div>
+      </figcaption>
+    </figure>
+  </section>
+
+  <section aria-labelledby="plan">
+    <h2 id="plan">The game plan</h2>
+    <div class="key">
+      <span class="tag t-done">Already done</span>
+      <span class="tag t-safe">Safe &middot; changes nothing on your PC</span>
+      <span class="tag t-ok">Needs your OK &middot; changes your PC</span>
+    </div>
+    <p class="key-note">Each &ldquo;needs your OK&rdquo; step is asked on its own, when its turn comes. Nothing else counts as a yes.</p>
+    <ol class="steps">
+      <li class="step is-done">
+        <span class="num">1</span>
+        <div class="step-body">
+          <h3>Install the tools to build the plug-in</h3>
+          <span class="tag t-done">Already done</span>
+          <p>You approved it. Installed and checked.</p>
+        </div>
+      </li>
+      <li class="step is-here">
+        <span class="num">2</span>
+        <div class="step-body">
+          <span class="here">You are here</span>
+          <h3>Save today&rsquo;s sound settings</h3>
+          <span class="tag t-safe">Safe &middot; changes nothing on your PC</span>
+          <p>Copy the sound settings to two files, and play a quiet test tone to confirm where the volume slider acts.</p>
+        </div>
+      </li>
+      <li class="step">
+        <span class="num">3</span>
+        <div class="step-body">
+          <h3>Build the plug-in and test it on recordings</h3>
+          <span class="tag t-safe">Safe &middot; changes nothing on your PC</span>
+          <p>It is tested inside a test program, not inside Windows&rsquo; sound. The one-step undo, which puts every setting back, is written and rehearsed.</p>
+        </div>
+      </li>
+      <li class="step">
+        <span class="num">4</span>
+        <div class="step-body">
+          <h3>First real try: a monitor&rsquo;s sound output, no test key</h3>
+          <span class="tag t-ok">Needs your OK &middot; changes your PC</span>
+          <p>We ask you which monitor first. With nothing plugged into its audio jack and no speakers, you hear nothing. Sound pauses while Windows&rsquo; audio restarts. Test key: a Windows setting allowing plug-ins Microsoft hasn&rsquo;t signed.</p>
+          <p class="change"><b>Changes:</b> plug-in added to one monitor output. <b>Undo:</b> <span class="nw">one-step undo.</span></p>
+        </div>
+      </li>
+      <li class="step is-maybe">
+        <span class="num">5</span>
+        <div class="step-body">
+          <h3>Only if step 4 fails: the test key</h3>
+          <span class="tag t-ok">Needs your OK &middot; changes your PC</span>
+          <p>Turn the test key on, restart the PC (asked separately), then try step 4 again. Side effect: while the key is on, copy-protected video (some streaming services) may refuse to play.</p>
+          <p class="change"><b>Changes:</b> one Windows setting, then a PC restart. <b>Undo:</b> delete it, restart.</p>
+        </div>
+      </li>
+      <li class="step">
+        <span class="num">6</span>
+        <div class="step-body">
+          <h3>Your Headphones, at low volume</h3>
+          <span class="tag t-ok">Needs your OK &middot; changes your PC</span>
+          <p>Headphones off your head, slider at 10% or less, a quiet test tone first. Then real Zoom calls and YouTube.</p>
+          <p class="change"><b>Changes:</b> plug-in added to the Headphones&rsquo; effects. <b>Undo:</b> <span class="nw">one-step undo.</span></p>
+        </div>
+      </li>
+      <li class="step">
+        <span class="num">7</span>
+        <div class="step-body">
+          <h3>The tray app becomes the remote control</h3>
+          <span class="tag t-ok">Needs your OK &middot; changes your PC</span>
+          <p>On and off, your cap, and alerts that say how far over the sound went.</p>
+          <p class="change"><b>Changes:</b> tray app starts with Windows. <b>Undo:</b> untick it in the menu.</p>
+        </div>
+      </li>
+      <li class="step">
+        <span class="num">8</span>
+        <div class="step-body">
+          <h3>Close the gaps</h3>
+          <span class="tag t-ok">Needs your OK &middot; changes your PC</span>
+          <p>Stop apps from taking sole control of the Headphones (&ldquo;exclusive mode&rdquo;), so nothing slips past the plug-in.</p>
+          <p class="change"><b>Changes:</b> one Headphones setting. <b>Undo:</b> tick the box again.</p>
+        </div>
+      </li>
+    </ol>
+  </section>
+
+  <section aria-labelledby="fallback">
+    <h2 id="fallback">If it doesn&rsquo;t work</h2>
+    <ul class="fallback">
+      <li><b>Plan B:</b> Voicemeeter, a sound-mixer app with its own limiter; it needs no test key.</li>
+      <li><b>One-step undo:</b> double-click the Undo icon on your desktop, say yes once, and every setting goes back.</li>
+    </ul>
+  </section>
+
+  <footer>From <code>PIPELINE-LIMITER-PLAN.md</code>, audited 10 Nov 2026; the sound path is your sketch of the same day. The details and sources are in <code>PLAN-AUDIT.md</code>.</footer>
+</main>

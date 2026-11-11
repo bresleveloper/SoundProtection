@@ -1,0 +1,12 @@
+# Line endings: the repo stores LF; checkout converts per platform.
+* text=auto
+
+# cmd.exe and Visual Studio want CRLF wherever the repo is checked out.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.sln text eol=crlf
+
+# Images are binary.
+*.png binary
+*.jpg binary
+*.ico binary

@@ -1,0 +1,684 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sound Protection Game Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=Barlow+Semi+Condensed:wght@600;700&display=swap">
+<style>
+  /* Game plan 3: Ariel's sketch mapped onto Windows 11, the two ways to build it, then the numbered route. Same look as page v2. */
+  :root {
+    --bg: #F2F5F6;
+    --surface: #FFFFFF;
+    --ink: #142029;
+    --muted: #56646F;
+    --rule: #D3DBE0;
+    --box-stroke: #8C9AA5;
+    --accent: #3446C2;
+    --accent-soft: #E3E7FB;
+    --on-accent: #FFFFFF;
+    --done-fg: #54616B;
+    --done-bg: #E4E9EC;
+    --safe-fg: #14683F;
+    --safe-bg: #D9F0E3;
+    --ok-fg: #8A4A00;
+    --ok-bg: #FBE7CB;
+    --ok-soft: #FFF6EA;
+    --font-display: "Barlow Semi Condensed", "Segoe UI Semibold", "Arial Narrow", sans-serif;
+    --font-body: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0E1419;
+      --surface: #162029;
+      --ink: #E5ECF1;
+      --muted: #9BA9B4;
+      --rule: #27333D;
+      --box-stroke: #6C7B87;
+      --accent: #93A0FF;
+      --accent-soft: #232B57;
+      --on-accent: #0D1233;
+      --done-fg: #AAB6BF;
+      --done-bg: #24303A;
+      --safe-fg: #72D8A6;
+      --safe-bg: #12352A;
+      --ok-fg: #F4B862;
+      --ok-bg: #3A2A13;
+      --ok-soft: #221B12;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0E1419;
+    --surface: #162029;
+    --ink: #E5ECF1;
+    --muted: #9BA9B4;
+    --rule: #27333D;
+    --box-stroke: #6C7B87;
+    --accent: #93A0FF;
+    --accent-soft: #232B57;
+    --on-accent: #0D1233;
+    --done-fg: #AAB6BF;
+    --done-bg: #24303A;
+    --safe-fg: #72D8A6;
+    --safe-bg: #12352A;
+    --ok-fg: #F4B862;
+    --ok-bg: #3A2A13;
+    --ok-soft: #221B12;
+    color-scheme: dark;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 1.1875rem;
+    line-height: 1.55;
+  }
+  .page {
+    max-width: 66rem;
+    margin: 0 auto;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 40px 64px;
+    display: grid;
+    gap: 64px;
+  }
+  .page > * { min-width: 0; }
+
+  h1, h2 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    line-height: 1.05;
+    text-wrap: balance;
+    margin: 0;
+  }
+  h1 { font-size: clamp(2.4rem, 1.6rem + 3vw, 3.6rem); letter-spacing: -0.01em; }
+  h2 { font-size: clamp(1.75rem, 1.4rem + 1.2vw, 2.25rem); }
+  h3, h4 { margin: 0; }
+  p { margin: 0; }
+  a { color: var(--accent); }
+
+  .eyebrow {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 0.95rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  header { display: grid; gap: 14px; }
+  .lead { font-size: 1.3rem; max-width: 38em; }
+
+  section { display: grid; gap: 22px; }
+  .intro { max-width: 40em; color: var(--muted); }
+
+  figure { margin: 0; }
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 14px;
+    padding: 18px;
+    min-width: 0;
+  }
+
+  /* The sound path: Ariel's sketch, inside Windows 11 */
+  .flow {
+    display: grid;
+    grid-template-columns: minmax(0, 38rem) minmax(0, 1fr);
+    gap: 28px 44px;
+    align-items: start;
+  }
+  .scroll { overflow-x: auto; }
+  .flow svg { display: block; width: 100%; height: auto; }
+  .swipe { display: none; font-size: 0.95rem; color: var(--muted); margin-top: 10px; }
+  .flow-notes { display: grid; gap: 28px; align-content: start; max-width: 30em; }
+  .note-block { display: grid; gap: 14px; }
+  .note-block h3, .way h4 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 1.05rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .legend, .does { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+  .legend li { display: grid; grid-template-columns: 1.6rem minmax(0, 1fr); gap: 12px; align-items: start; }
+  .sw { display: block; width: 1.6rem; height: 1.15rem; margin-top: 0.3rem; border-radius: 5px; border: 2px solid; }
+  .sw-win { background: var(--surface); border-color: var(--box-stroke); }
+  .sw-live { background: var(--accent-soft); border-color: var(--accent); }
+  .sw-tray { background: var(--ok-bg); border-color: var(--ok-fg); }
+  .sw-region { background: var(--bg); border: 2px dashed var(--box-stroke); }
+  .sw-line { height: 0; border: 0; border-top: 3px dashed var(--ok-fg); border-radius: 0; margin-top: 0.85rem; }
+  .does li { padding-left: 16px; border-left: 4px solid var(--accent); }
+  .does.plain li { border-left-color: var(--rule); }
+
+  /* Diagram marks, themed from the tokens above */
+  svg text { font-family: var(--font-body); }
+  .d-box { fill: var(--surface); stroke: var(--box-stroke); stroke-width: 2; }
+  .d-data { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 2; }
+  .d-tray { fill: var(--ok-bg); stroke: var(--ok-fg); stroke-width: 2; }
+  .d-region { fill: var(--bg); stroke: var(--box-stroke); stroke-width: 1.5; stroke-dasharray: 6 5; }
+  .d-rl { font-family: var(--font-display); font-weight: 700; font-size: 15px; letter-spacing: 0.08em; fill: var(--muted); }
+  .d-t { font-family: var(--font-display); font-weight: 700; font-size: 19px; fill: var(--ink); }
+  .d-d { font-size: 16px; fill: var(--ink); }
+  .d-m { font-size: 16px; fill: var(--muted); }
+  .d-dn { font-size: 16px; font-weight: 700; fill: var(--accent); }
+  .d-acc { fill: var(--accent); }
+  .d-ora { fill: var(--ok-fg); }
+  .d-b { font-weight: 700; }
+  .d-cap { font-family: var(--font-display); font-weight: 700; font-size: 26px; }
+  .d-flow { fill: none; stroke: var(--ink); stroke-width: 2.5; stroke-linejoin: round; }
+  .d-head { fill: var(--ink); }
+  .d-head-o { fill: var(--ok-fg); }
+  .d-ctl { fill: none; stroke: var(--ok-fg); stroke-width: 2.5; stroke-dasharray: 7 6; stroke-linejoin: round; }
+  .d-div { fill: none; stroke: var(--accent); stroke-width: 1.5; opacity: 0.45; }
+  .d-ico { fill: none; stroke: var(--accent); stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+  .d-ico-i { stroke: var(--ink); stroke-width: 1.8; }
+  .d-toggle { fill: var(--ok-fg); }
+  .d-knob { fill: var(--ok-bg); }
+  .d-track { fill: none; stroke: var(--box-stroke); stroke-width: 3; stroke-linecap: round; }
+  .d-slide-knob { fill: var(--surface); stroke: var(--ink); stroke-width: 2.2; }
+
+  /* Two ways */
+  .ways { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start; }
+  .way {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 14px;
+    padding: 22px;
+    display: grid;
+    gap: 16px;
+    justify-items: start;
+    min-width: 0;
+  }
+  .way.is-pick { border: 2px solid var(--accent); }
+  .way h3 { font-family: var(--font-display); font-weight: 700; font-size: 1.6rem; line-height: 1.1; text-wrap: balance; }
+  .way-tag {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 0.95rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 3px 12px;
+    border-radius: 999px;
+    background: var(--done-bg);
+    color: var(--ink);
+  }
+  .way.is-pick .way-tag { background: var(--accent); color: var(--on-accent); }
+  .way-part { display: grid; gap: 8px; }
+  .pros, .cons { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+  .pros li, .cons li { display: grid; grid-template-columns: 1.2rem minmax(0, 1fr); gap: 8px; }
+  .pros li::before { content: "\2713"; color: var(--safe-fg); font-weight: 700; }
+  .cons li::before { content: "!"; color: var(--ok-fg); font-weight: 700; text-align: center; }
+  .suggest { max-width: 44em; padding: 4px 0 4px 16px; border-left: 4px solid var(--accent); }
+
+  /* The game plan */
+  .key { display: flex; flex-wrap: wrap; gap: 10px 12px; align-items: center; }
+  .key-note { color: var(--muted); max-width: 40em; }
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.9rem;
+    font-weight: 700;
+    line-height: 1.3;
+    padding: 4px 12px 4px 10px;
+    border-radius: 999px;
+    width: fit-content;
+  }
+  .tag::before { content: ""; width: 0.6em; height: 0.6em; flex: none; background: currentColor; }
+  .t-done { color: var(--done-fg); background: var(--done-bg); }
+  .t-done::before { content: "\2713"; width: auto; height: auto; background: none; font-size: 1em; }
+  .t-safe { color: var(--safe-fg); background: var(--safe-bg); }
+  .t-safe::before { border-radius: 50%; }
+  .t-ok { color: var(--ok-fg); background: var(--ok-bg); }
+  .t-ok::before { transform: rotate(45deg); width: 0.55em; height: 0.55em; }
+
+  .steps { list-style: none; margin: 0; padding: 0; display: grid; }
+  .step {
+    display: grid;
+    grid-template-columns: 2.9rem minmax(0, 1fr);
+    gap: 16px;
+    padding: 22px 12px;
+    border-top: 1px solid var(--rule);
+  }
+  .step:first-child { border-top: 0; }
+  .num {
+    width: 2.6rem;
+    height: 2.6rem;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 1.4rem;
+    border: 2px solid var(--box-stroke);
+    background: var(--surface);
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+  }
+  .step-body { display: grid; gap: 8px; min-width: 0; justify-items: start; }
+  .step h3 { font-size: 1.25rem; line-height: 1.3; text-wrap: balance; }
+  .step p { max-width: 40em; }
+  .is-done .num { background: var(--done-bg); border-color: var(--done-bg); color: var(--done-fg); }
+  .is-done h3 { color: var(--done-fg); }
+  .is-here {
+    background: var(--accent-soft);
+    border-radius: 14px;
+    border-top-color: transparent;
+    box-shadow: inset 0 0 0 2px var(--accent);
+  }
+  .is-here + .step { border-top-color: transparent; }
+  .is-here .num { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  .here {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 0.95rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--on-accent);
+    background: var(--accent);
+    padding: 3px 12px;
+    border-radius: 999px;
+  }
+  .is-maybe .step-body { border-left: 3px dashed var(--ok-fg); padding-left: 14px; }
+  .change {
+    font-size: 1.05rem;
+    background: var(--ok-soft);
+    border: 1px solid var(--ok-bg);
+    border-radius: 10px;
+    padding: 8px 14px;
+  }
+  .change b { color: var(--ok-fg); }
+  .nw { white-space: nowrap; }
+
+  /* What we find out on the way */
+  .finds { list-style: none; margin: 0; padding: 0; display: grid; max-width: 48em; }
+  .finds li {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 4px 16px;
+    padding: 14px 0;
+    border-top: 1px solid var(--rule);
+  }
+  .finds li:first-child { border-top: 0; padding-top: 0; }
+  .finds .q { font-weight: 700; }
+  .finds .when { font-family: var(--font-display); font-weight: 700; font-size: 1.05rem; color: var(--accent); white-space: nowrap; }
+  .finds .exp { grid-column: 1 / -1; color: var(--muted); }
+
+  .fallback { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; max-width: 44em; }
+  .fallback li { padding-left: 16px; border-left: 4px solid var(--rule); }
+  .fallback b { font-family: var(--font-display); font-size: 1.2rem; letter-spacing: 0.01em; }
+
+  .decide { margin: 0; padding-left: 1.5em; display: grid; gap: 12px; max-width: 44em; }
+  .decide li::marker { font-family: var(--font-display); font-weight: 700; color: var(--accent); }
+  .calls { color: var(--muted); max-width: 44em; }
+
+  footer { color: var(--muted); font-size: 1rem; border-top: 1px solid var(--rule); padding-top: 18px; display: grid; gap: 6px; }
+  code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 0.92em; }
+
+  @media (max-width: 900px) {
+    .flow { grid-template-columns: minmax(0, 1fr); }
+    .flow .panel { max-width: 42rem; }
+    .ways { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 760px) {
+    body { font-size: 1.125rem; }
+    .page { gap: 52px; padding-block: 28px 48px; }
+    .lead { font-size: 1.2rem; }
+    .step { grid-template-columns: 2.5rem minmax(0, 1fr); gap: 12px; padding: 20px 10px; }
+    .num { width: 2.3rem; height: 2.3rem; font-size: 1.25rem; }
+    .panel { padding: 14px 10px; }
+    .way { padding: 18px 16px; }
+  }
+  @media (max-width: 620px) {
+    .flow svg { min-width: 560px; }
+    .swipe { display: block; }
+  }
+</style>
+</head>
+<body>
+<main class="page">
+  <header>
+    <p class="eyebrow">Sound Protection &middot; game plan 3 &middot; 10 Nov 2026</p>
+    <h1>Your sketch, built on Windows&nbsp;11</h1>
+    <p class="lead">Yes, it can be done. Windows 11 has one place where every app&rsquo;s sound can be turned down before your volume slider: inside its sound engine. Your Headphones already run Realtek&rsquo;s effects there. Ours goes next to them.</p>
+  </header>
+
+  <section aria-labelledby="flow">
+    <h2 id="flow">Where each part of your sketch goes</h2>
+    <p class="intro">Your sketch, mapped onto what is really inside your PC. The numbers are your example, with the cap at 25.</p>
+    <figure class="flow">
+      <div class="panel">
+        <div class="scroll">
+          <svg viewBox="0 0 660 796" role="img" aria-label="Your sketch inside Windows 11. Zoom (sound a), YouTube (sound b) and other apps (sound c) each enter Windows&rsquo; sound engine. There, each app&rsquo;s sound first passes Realtek&rsquo;s own effect, then our leveler, which runs one copy per app: sound a goes from 28 down to 25, sound b from 35 down to 25, and sound c at 17 is left alone. All apps are then mixed together and pass the Realtek and Sound Research effects, then our safety cap on the total, for sudden bangs. Then come the Realtek driver, the sound chip volume, which is your Windows volume slider and stays free, and the headphones, static at max. The tray app, switched on with the cap at 25, sends the cap and on/off to our leveler and our safety cap, and shows what was turned down.">
+            <defs>
+              <marker id="d-arrow" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="12" markerHeight="12" markerUnits="userSpaceOnUse" orient="auto">
+                <path class="d-head" d="M1 1 L11 6 L1 11 Z"/>
+              </marker>
+              <marker id="d-arrow-o" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="12" markerHeight="12" markerUnits="userSpaceOnUse" orient="auto">
+                <path class="d-head-o" d="M1 1 L11 6 L1 11 Z"/>
+              </marker>
+            </defs>
+
+            <!-- the apps: your sounds a, b, c -->
+            <rect class="d-box" x="16" y="8" width="136" height="56" rx="10"/>
+            <text class="d-t" x="84" y="33" text-anchor="middle">Zoom</text>
+            <text class="d-m" x="84" y="55" text-anchor="middle">sound a</text>
+            <rect class="d-box" x="166" y="8" width="136" height="56" rx="10"/>
+            <text class="d-t" x="234" y="33" text-anchor="middle">YouTube</text>
+            <text class="d-m" x="234" y="55" text-anchor="middle">sound b</text>
+            <rect class="d-box" x="316" y="8" width="136" height="56" rx="10"/>
+            <text class="d-t" x="384" y="33" text-anchor="middle">Other apps</text>
+            <text class="d-m" x="384" y="55" text-anchor="middle">sound c</text>
+
+            <!-- Windows' sound engine (audiodg.exe) -->
+            <rect class="d-region" x="4" y="82" width="462" height="444" rx="16"/>
+            <text class="d-rl" x="452" y="518" text-anchor="end">SOUND ENGINE</text>
+
+            <path class="d-flow" d="M84 64 V113" marker-end="url(#d-arrow)"/>
+            <path class="d-flow" d="M234 64 V113" marker-end="url(#d-arrow)"/>
+            <path class="d-flow" d="M384 64 V113" marker-end="url(#d-arrow)"/>
+
+            <!-- Realtek's own per-app effect, one copy per app -->
+            <rect class="d-box" x="16" y="114" width="136" height="42" rx="10"/>
+            <text class="d-d" x="84" y="141" text-anchor="middle">Realtek effect</text>
+            <rect class="d-box" x="166" y="114" width="136" height="42" rx="10"/>
+            <text class="d-d" x="234" y="141" text-anchor="middle">Realtek effect</text>
+            <rect class="d-box" x="316" y="114" width="136" height="42" rx="10"/>
+            <text class="d-d" x="384" y="141" text-anchor="middle">Realtek effect</text>
+
+            <path class="d-flow" d="M84 156 V191" marker-end="url(#d-arrow)"/>
+            <path class="d-flow" d="M234 156 V191" marker-end="url(#d-arrow)"/>
+            <path class="d-flow" d="M384 156 V191" marker-end="url(#d-arrow)"/>
+
+            <!-- ours: the leveler, one copy per app (your "process live output") -->
+            <rect class="d-data" x="16" y="192" width="436" height="84" rx="10"/>
+            <text class="d-t d-acc" x="30" y="215">Our leveler &#183; one copy per app</text>
+            <path class="d-div" d="M159 226 V268 M309 226 V268"/>
+            <text class="d-d" x="84" y="245" text-anchor="middle">28 &#8594; 25</text>
+            <text class="d-dn" x="84" y="266" text-anchor="middle">turned down</text>
+            <text class="d-d" x="234" y="245" text-anchor="middle">35 &#8594; 25</text>
+            <text class="d-dn" x="234" y="266" text-anchor="middle">turned down</text>
+            <text class="d-d" x="384" y="245" text-anchor="middle">17</text>
+            <text class="d-m" x="384" y="266" text-anchor="middle">left alone</text>
+
+            <path class="d-flow" d="M84 276 V305" marker-end="url(#d-arrow)"/>
+            <path class="d-flow" d="M234 276 V305" marker-end="url(#d-arrow)"/>
+            <path class="d-flow" d="M384 276 V305" marker-end="url(#d-arrow)"/>
+
+            <rect class="d-box" x="16" y="306" width="436" height="44" rx="10"/>
+            <text class="d-t" x="234" y="334" text-anchor="middle">All apps mixed together</text>
+            <path class="d-flow" d="M234 350 V375" marker-end="url(#d-arrow)"/>
+
+            <rect class="d-box" x="16" y="376" width="436" height="44" rx="10"/>
+            <text class="d-t" x="234" y="404" text-anchor="middle">Realtek + Sound Research effects</text>
+            <path class="d-flow" d="M234 420 V445" marker-end="url(#d-arrow)"/>
+
+            <!-- ours: the safety cap on the total -->
+            <rect class="d-data" x="16" y="446" width="436" height="60" rx="10"/>
+            <text class="d-t d-acc" x="30" y="471">Our safety cap</text>
+            <text class="d-d" x="30" y="495">on the total, for sudden bangs</text>
+
+            <path class="d-flow" d="M234 506 V545" marker-end="url(#d-arrow)"/>
+
+            <!-- after the engine -->
+            <rect class="d-box" x="84" y="546" width="300" height="42" rx="10"/>
+            <text class="d-t" x="234" y="573" text-anchor="middle">Realtek driver</text>
+            <path class="d-flow" d="M234 588 V613" marker-end="url(#d-arrow)"/>
+
+            <rect class="d-box" x="84" y="614" width="300" height="90" rx="10"/>
+            <text class="d-t" x="100" y="640">Sound chip volume</text>
+            <path class="d-track" d="M306 632 H366"/>
+            <circle class="d-slide-knob" cx="344" cy="632" r="7"/>
+            <path class="d-ico d-ico-i" d="M322 647 H354 M326 643 L321 647 L326 651 M350 643 L355 647 L350 651"/>
+            <text class="d-d" x="100" y="668">= your Windows volume slider</text>
+            <text class="d-m" x="100" y="690">stays free: you play with it</text>
+            <path class="d-flow" d="M234 704 V729" marker-end="url(#d-arrow)"/>
+
+            <rect class="d-box" x="84" y="730" width="300" height="58" rx="10"/>
+            <text class="d-t" x="100" y="756">Headphones</text>
+            <text class="d-m" x="100" y="778">static, at max</text>
+
+            <!-- the tray app: on/off and the cap -->
+            <rect class="d-tray" x="488" y="192" width="160" height="160" rx="10"/>
+            <text class="d-t d-ora" x="502" y="218">Tray app</text>
+            <rect class="d-toggle" x="502" y="232" width="38" height="22" rx="11"/>
+            <circle class="d-knob" cx="529" cy="243" r="8"/>
+            <text class="d-d d-ora d-b" x="548" y="249">on</text>
+            <text class="d-cap d-ora" x="502" y="290">cap = 25</text>
+            <text class="d-m" x="502" y="318">shows what was</text>
+            <text class="d-m" x="502" y="340">turned down</text>
+
+            <path class="d-ctl" d="M488 234 H454" marker-end="url(#d-arrow-o)"/>
+            <path class="d-ctl" d="M568 352 V466 Q568 476 558 476 H454" marker-end="url(#d-arrow-o)"/>
+          </svg>
+        </div>
+        <p class="swipe">Scroll sideways to see the whole drawing.</p>
+      </div>
+      <figcaption class="flow-notes">
+        <div class="note-block">
+          <h3>How to read it</h3>
+          <ul class="legend">
+            <li><span class="sw sw-win" aria-hidden="true"></span><span><b>Already on your PC.</b> Windows&rsquo; and Realtek&rsquo;s parts.</span></li>
+            <li><span class="sw sw-live" aria-hidden="true"></span><span><b>New: our plug-in,</b> in two parts.</span></li>
+            <li><span class="sw sw-tray" aria-hidden="true"></span><span><b>The tray app.</b> Your on/off and your cap.</span></li>
+            <li><span class="sw sw-line" aria-hidden="true"></span><span><b>Settings</b> the tray sends.</span></li>
+            <li><span class="sw sw-region" aria-hidden="true"></span><span><b>Inside Windows&rsquo; sound engine.</b></span></li>
+          </ul>
+        </div>
+        <div class="note-block">
+          <h3>What it does</h3>
+          <ul class="does">
+            <li>Each app passes its own copy of our leveler. Over the cap (a and b): turned down to it. Under the cap (c): left alone.</li>
+            <li>After the apps are mixed, our safety cap catches sudden bangs.</li>
+            <li>Your Headphones do the volume in the sound chip, after all of this. So the slider stays free, and the headphones stay at max.</li>
+            <li>The quick version (Way&nbsp;2, below) works at the same point, by turning down each app&rsquo;s own volume instead.</li>
+          </ul>
+        </div>
+      </figcaption>
+    </figure>
+  </section>
+
+  <section aria-labelledby="ways">
+    <h2 id="ways">Two ways to turn loud apps down</h2>
+    <div class="ways">
+      <article class="way is-pick">
+        <span class="way-tag">Recommended &middot; the real cap</span>
+        <h3>Way 1: our plug-in inside the sound engine</h3>
+        <p>Turns each app down before it is mixed, and holds sudden bangs on the total. This is the drawing above.</p>
+        <div class="way-part">
+          <h4>Good</h4>
+          <ul class="pros">
+            <li>Every app, before the slider, as in your sketch.</li>
+            <li>Holds sudden bangs at once.</li>
+            <li>The slider stays free; the headphones stay at max.</li>
+          </ul>
+        </div>
+        <div class="way-part">
+          <h4>Catches</h4>
+          <ul class="cons">
+            <li>Windows normally loads only plug-ins it has signed. Expect to need the &ldquo;test key&rdquo;, a Windows setting that allows unsigned ones. While it is on, some copy-protected video may refuse to play.</li>
+            <li>Windows or Realtek updates can knock it out. The tray checks after every start and offers a Repair.</li>
+            <li>&ldquo;Audio enhancements: Off&rdquo; very likely switches it off. The tray then warns you in red.</li>
+          </ul>
+        </div>
+      </article>
+      <article class="way">
+        <span class="way-tag">Quick start &middot; no install</span>
+        <h3>Way 2: the tray turns each loud app&rsquo;s own volume down</h3>
+        <p>Like a hand on each app&rsquo;s slider in Windows&rsquo; Volume Mixer. It lowers a loud app, then lets it back up when it gets quiet.</p>
+        <div class="way-part">
+          <h4>Good</h4>
+          <ul class="pros">
+            <li>Nothing to install, no admin, no test key.</li>
+            <li>Per app, and the master slider stays free.</li>
+            <li>A similar new tool reports turning loud parts down in 10&ndash;30&nbsp;ms.</li>
+          </ul>
+        </div>
+        <div class="way-part">
+          <h4>Catches</h4>
+          <ul class="cons">
+            <li>The start of each loud part gets through, so it can&rsquo;t stop a bang.</li>
+            <li>You&rsquo;ll see the per-app sliders move.</li>
+            <li>If the tray app crashes, an app can stay low until the tray starts again and puts it back.</li>
+          </ul>
+        </div>
+      </article>
+    </div>
+    <p class="suggest"><b>My suggestion:</b> try Way&nbsp;2 first, to feel the cap. Meanwhile I build Way&nbsp;1 safely, on recordings. Then we take Way&nbsp;1&rsquo;s PC steps one OK at a time.</p>
+  </section>
+
+  <section aria-labelledby="loud">
+    <h2 id="loud">What &ldquo;too loud&rdquo; means</h2>
+    <ul class="does plain">
+      <li><b>Loudness, not peaks.</b> The leveler listens the way broadcasters measure loudness, over the last 0.4&nbsp;seconds, and turns an app down smoothly. Quiet apps are never turned up.</li>
+      <li><b>Bangs.</b> The safety cap sits a little above your cap and catches sudden peaks at once.</li>
+      <li><b>The number.</b> Before the slider, the PC only knows a digital level: 0 is the loudest, and everything else is negative. I read your 25, 28, 35 and 17 as an example. I suggest the panel shows each app&rsquo;s level and the cap on that one scale (for example, a cap of &minus;20), so you set it by watching a loud call.</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="plan">
+    <h2 id="plan">The game plan</h2>
+    <div class="key">
+      <span class="tag t-done">Already done</span>
+      <span class="tag t-safe">Safe &middot; changes nothing on your PC</span>
+      <span class="tag t-ok">Needs your OK &middot; changes your PC</span>
+    </div>
+    <p class="key-note">Each &ldquo;needs your OK&rdquo; step is asked on its own, when its turn comes. Nothing else counts as a yes.</p>
+    <ol class="steps">
+      <li class="step is-done">
+        <span class="num">1</span>
+        <div class="step-body">
+          <h3>Install the tools to build the plug-in</h3>
+          <span class="tag t-done">Already done</span>
+          <p>You approved it. Installed and checked.</p>
+        </div>
+      </li>
+      <li class="step is-done">
+        <span class="num">2</span>
+        <div class="step-body">
+          <h3>Your sketch, the research, this plan</h3>
+          <span class="tag t-done">Already done</span>
+          <p>Two research passes and read-only checks of your PC. The details and sources are in <code>WIN11-BUILD-PLAN.md</code>.</p>
+        </div>
+      </li>
+      <li class="step is-here">
+        <span class="num">3</span>
+        <div class="step-body">
+          <span class="here">Next &middot; your call</span>
+          <h3>Optional quick version: the tray turns loud apps down</h3>
+          <span class="tag t-ok">Needs your OK &middot; changes your PC</span>
+          <p>This is Way&nbsp;2. It starts with a one-minute test: does an app&rsquo;s meter read before or after its own volume? Then the tray rides each loud app&rsquo;s volume.</p>
+          <p class="change"><b>Changes:</b> while it is on, the volume of any app over the cap. <b>Undo:</b> switch it off, and every app goes back where it was.</p>
+        </div>
+      </li>
+      <li class="step">
+        <span class="num">4</span>
+        <div class="step-body">
+          <h3>Save today&rsquo;s sound settings</h3>
+          <span class="tag t-safe">Safe &middot; changes nothing on your PC</span>
+          <p>Copy the sound settings to two files, and play a quiet test tone to confirm the volume slider acts after the plug-in&rsquo;s place.</p>
+        </div>
+      </li>
+      <li class="step">
+        <span class="num">5</span>
+        <div class="step-body">
+          <h3>Build the plug-in and test it on recordings</h3>
+          <span class="tag t-safe">Safe &middot; changes nothing on your PC</span>
+          <p>The leveler and the safety cap are tested on Zoom and YouTube recordings, inside a test program, not inside Windows&rsquo; sound. The one-step undo, which puts every setting back, is written and rehearsed.</p>
+        </div>
+      </li>
+      <li class="step">
+        <span class="num">6</span>
+        <div class="step-body">
+          <h3>First real try: a monitor&rsquo;s sound output, no test key</h3>
+          <span class="tag t-ok">Needs your OK &middot; changes your PC</span>
+          <p>We ask you which monitor first. With nothing plugged into its audio jack and no speakers, you hear nothing. Most likely Windows refuses our unsigned plug-in here; this step shows whether it does.</p>
+          <p class="change"><b>Changes:</b> plug-in added to one monitor output; sound pauses while Windows&rsquo; audio restarts. <b>Undo:</b> <span class="nw">one-step undo.</span></p>
+        </div>
+      </li>
+      <li class="step is-maybe">
+        <span class="num">7</span>
+        <div class="step-body">
+          <h3>Only if step 6 fails: the test key</h3>
+          <span class="tag t-ok">Needs your OK &middot; changes your PC</span>
+          <p>Turn the test key on, restart the PC (asked separately), then try step 6 again. Then we play Zoom, YouTube and anything copy-protected you watch, to check it all still plays.</p>
+          <p class="change"><b>Changes:</b> one Windows setting, then a PC restart. <b>Undo:</b> delete it, restart.</p>
+        </div>
+      </li>
+      <li class="step">
+        <span class="num">8</span>
+        <div class="step-body">
+          <h3>Your Headphones, at low volume</h3>
+          <span class="tag t-ok">Needs your OK &middot; changes your PC</span>
+          <p>Headphones off your head, slider at 10% or less, a quiet test tone first. Then real Zoom calls and YouTube, checking that both pass through the per-app part.</p>
+          <p class="change"><b>Changes:</b> plug-in added to two Headphones effect lists, after Realtek&rsquo;s. <b>Undo:</b> <span class="nw">one-step undo.</span></p>
+        </div>
+      </li>
+      <li class="step">
+        <span class="num">9</span>
+        <div class="step-body">
+          <h3>The tray app becomes the remote control</h3>
+          <span class="tag t-ok">Needs your OK &middot; changes your PC</span>
+          <p>On and off, your cap, and what was turned down, per app, in dB and %. If you used the quick version, the plug-in takes over from it.</p>
+          <p class="change"><b>Changes:</b> tray app starts with Windows. <b>Undo:</b> untick it in the menu.</p>
+        </div>
+      </li>
+      <li class="step">
+        <span class="num">10</span>
+        <div class="step-body">
+          <h3>Close the gaps</h3>
+          <span class="tag t-ok">Needs your OK &middot; changes your PC</span>
+          <p>Stop apps from taking sole control of the Headphones (&ldquo;exclusive mode&rdquo;). Add a Repair button for after Realtek driver updates, and a red warning if Windows switches effects off.</p>
+          <p class="change"><b>Changes:</b> one Headphones setting. <b>Undo:</b> tick the box again.</p>
+        </div>
+      </li>
+    </ol>
+  </section>
+
+  <section aria-labelledby="finds">
+    <h2 id="finds">What we find out on the way</h2>
+    <ul class="finds">
+      <li><span class="q">Does an app&rsquo;s meter read before or after its own volume?</span><span class="when">Step 3</span><span class="exp">Unknown. The quick version handles both.</span></li>
+      <li><span class="q">Does Windows load our plug-in without the test key?</span><span class="when">Step 6</span><span class="exp">I expect not.</span></li>
+      <li><span class="q">Does anything you watch stop playing with the key on?</span><span class="when">Step 7</span><span class="exp">Zoom and YouTube should be fine. Some paid streaming may refuse.</span></li>
+      <li><span class="q">Do Zoom and YouTube both pass the per-app part?</span><span class="when">Step 8</span><span class="exp">YouTube should. Zoom is unknown; if it skips it, the safety cap still holds Zoom.</span></li>
+      <li><span class="q">Does &ldquo;Audio enhancements: Off&rdquo; switch our plug-in off?</span><span class="when">Step 10</span><span class="exp">Probably yes, so the tray warns you.</span></li>
+      <li><span class="q">Do Windows or Realtek updates remove it?</span><span class="when">Every start</span><span class="exp">Sometimes, so the tray offers a Repair.</span></li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="fallback">
+    <h2 id="fallback">If it doesn&rsquo;t work</h2>
+    <ul class="fallback">
+      <li><b>Way 2 alone:</b> the quick version needs no test key.</li>
+      <li><b>Plan B:</b> Voicemeeter, a sound-mixer app with its own limiter. It needs no test key, but your Windows slider would then come before the cap.</li>
+      <li><b>One-step undo:</b> double-click the Undo icon on your desktop, say yes once, and every setting goes back.</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="decide">
+    <h2 id="decide">Your decisions</h2>
+    <ol class="decide">
+      <li><b>Now:</b> start with the quick version (step 3), or go straight to step 4? I suggest the quick version.</li>
+      <li><b>The cap&rsquo;s number:</b> the digital scale, which I suggest, or dB at your ear, which is only true at one slider position.</li>
+      <li><b>At step 7:</b> the test key, once step 6 shows it is needed.</li>
+    </ol>
+    <p class="calls">My calls (tell me if one is wrong): the name &ldquo;Sound Protection&rdquo; everywhere; the safety cap starts 12&nbsp;dB above your cap; two apps playing at once may add up to about 3&nbsp;dB; Headphones first, Speakers later if you want.</p>
+  </section>
+
+  <footer>
+    <p>The details, the evidence and 40 sources are in <a href="WIN11-BUILD-PLAN.md"><code>WIN11-BUILD-PLAN.md</code></a>, next to this page.</p>
+    <p>Earlier: <a href="../../PIPELINE-LIMITER-PLAN.md"><code>PIPELINE-LIMITER-PLAN.md</code></a> and the handoff <a href="../01/HANDOFF.md"><code>docs/01/HANDOFF.md</code></a>. Your sketch: <a href="../01/ariel-sketch-2026-11-10.png"><code>docs/01/ariel-sketch-2026-11-10.png</code></a>.</p>
+  </footer>
+</main>
+</body>
+</html>

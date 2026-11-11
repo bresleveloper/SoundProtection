@@ -1,0 +1,164 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 660 796" width="660" height="796" role="img" aria-labelledby="dt dd">
+  <title id="dt">Ariel's sketch inside Windows 11: where each part of Sound Protection sits (2026-11-10)</title>
+  <desc id="dd">Your sketch inside Windows 11. Zoom (sound a), YouTube (sound b) and other apps (sound c) each enter Windows' sound engine. There, each app's sound first passes Realtek's own effect, then our leveler, which runs one copy per app: sound a goes from 28 down to 25, sound b from 35 down to 25, and sound c at 17 is left alone. All apps are then mixed together and pass the Realtek and Sound Research effects, then our safety cap on the total, for sudden bangs. Then come the Realtek driver, the sound chip volume, which is your Windows volume slider and stays free, and the headphones, static at max. The tray app, switched on with the cap at 25, sends the cap and on/off to our leveler and our safety cap, and shows what was turned down.</desc>
+  <style><![CDATA[
+@import url("https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Barlow+Semi+Condensed:wght@700&display=swap");
+svg {
+  --canvas: #FFFFFF;
+  --bg: #F2F5F6;
+  --surface: #FFFFFF;
+  --ink: #142029;
+  --muted: #56646F;
+  --box-stroke: #8C9AA5;
+  --accent: #3446C2;
+  --accent-soft: #E3E7FB;
+  --ok-fg: #8A4A00;
+  --ok-bg: #FBE7CB;
+  --font-display: "Barlow Semi Condensed", "Segoe UI Semibold", "Arial Narrow", sans-serif;
+  --font-body: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  svg {
+    --canvas: #162029;
+    --bg: #0E1419;
+    --surface: #162029;
+    --ink: #E5ECF1;
+    --muted: #9BA9B4;
+    --box-stroke: #6C7B87;
+    --accent: #93A0FF;
+    --accent-soft: #232B57;
+    --ok-fg: #F4B862;
+    --ok-bg: #3A2A13;
+  }
+}
+svg text { font-family: var(--font-body); }
+.d-canvas { fill: var(--canvas, transparent); }
+.d-box { fill: var(--surface); stroke: var(--box-stroke); stroke-width: 2; }
+.d-data { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 2; }
+.d-tray { fill: var(--ok-bg); stroke: var(--ok-fg); stroke-width: 2; }
+.d-region { fill: var(--bg); stroke: var(--box-stroke); stroke-width: 1.5; stroke-dasharray: 6 5; }
+.d-rl { font-family: var(--font-display); font-weight: 700; font-size: 15px; letter-spacing: 0.08em; fill: var(--muted); }
+.d-t { font-family: var(--font-display); font-weight: 700; font-size: 19px; fill: var(--ink); }
+.d-d { font-size: 16px; fill: var(--ink); }
+.d-m { font-size: 16px; fill: var(--muted); }
+.d-dn { font-size: 16px; font-weight: 700; fill: var(--accent); }
+.d-acc { fill: var(--accent); }
+.d-ora { fill: var(--ok-fg); }
+.d-b { font-weight: 700; }
+.d-cap { font-family: var(--font-display); font-weight: 700; font-size: 26px; }
+.d-flow { fill: none; stroke: var(--ink); stroke-width: 2.5; stroke-linejoin: round; }
+.d-head { fill: var(--ink); }
+.d-head-o { fill: var(--ok-fg); }
+.d-ctl { fill: none; stroke: var(--ok-fg); stroke-width: 2.5; stroke-dasharray: 7 6; stroke-linejoin: round; }
+.d-div { fill: none; stroke: var(--accent); stroke-width: 1.5; opacity: 0.45; }
+.d-ico { fill: none; stroke: var(--accent); stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.d-ico-m { stroke: var(--muted); }
+.d-ico-i { stroke: var(--ink); stroke-width: 1.8; }
+.d-toggle { fill: var(--ok-fg); }
+.d-knob { fill: var(--ok-bg); }
+.d-track { fill: none; stroke: var(--box-stroke); stroke-width: 3; stroke-linecap: round; }
+.d-slide-knob { fill: var(--surface); stroke: var(--ink); stroke-width: 2.2; }
+  ]]></style>
+  <rect class="d-canvas" width="660" height="796"/>
+  <defs>
+    <marker id="d-arrow" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="12" markerHeight="12" markerUnits="userSpaceOnUse" orient="auto">
+      <path class="d-head" d="M1 1 L11 6 L1 11 Z"/>
+    </marker>
+    <marker id="d-arrow-o" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="12" markerHeight="12" markerUnits="userSpaceOnUse" orient="auto">
+      <path class="d-head-o" d="M1 1 L11 6 L1 11 Z"/>
+    </marker>
+  </defs>
+
+  <!-- the apps: your sounds a, b, c -->
+  <rect class="d-box" x="16" y="8" width="136" height="56" rx="10"/>
+  <text class="d-t" x="84" y="33" text-anchor="middle">Zoom</text>
+  <text class="d-m" x="84" y="55" text-anchor="middle">sound a</text>
+  <rect class="d-box" x="166" y="8" width="136" height="56" rx="10"/>
+  <text class="d-t" x="234" y="33" text-anchor="middle">YouTube</text>
+  <text class="d-m" x="234" y="55" text-anchor="middle">sound b</text>
+  <rect class="d-box" x="316" y="8" width="136" height="56" rx="10"/>
+  <text class="d-t" x="384" y="33" text-anchor="middle">Other apps</text>
+  <text class="d-m" x="384" y="55" text-anchor="middle">sound c</text>
+
+  <!-- Windows' sound engine (audiodg.exe) -->
+  <rect class="d-region" x="4" y="82" width="462" height="444" rx="16"/>
+  <text class="d-rl" x="452" y="518" text-anchor="end">SOUND ENGINE</text>
+
+  <path class="d-flow" d="M84 64 V113" marker-end="url(#d-arrow)"/>
+  <path class="d-flow" d="M234 64 V113" marker-end="url(#d-arrow)"/>
+  <path class="d-flow" d="M384 64 V113" marker-end="url(#d-arrow)"/>
+
+  <!-- Realtek's own per-app effect, one copy per app -->
+  <rect class="d-box" x="16" y="114" width="136" height="42" rx="10"/>
+  <text class="d-d" x="84" y="141" text-anchor="middle">Realtek effect</text>
+  <rect class="d-box" x="166" y="114" width="136" height="42" rx="10"/>
+  <text class="d-d" x="234" y="141" text-anchor="middle">Realtek effect</text>
+  <rect class="d-box" x="316" y="114" width="136" height="42" rx="10"/>
+  <text class="d-d" x="384" y="141" text-anchor="middle">Realtek effect</text>
+
+  <path class="d-flow" d="M84 156 V191" marker-end="url(#d-arrow)"/>
+  <path class="d-flow" d="M234 156 V191" marker-end="url(#d-arrow)"/>
+  <path class="d-flow" d="M384 156 V191" marker-end="url(#d-arrow)"/>
+
+  <!-- ours: the leveler, one copy per app (your "process live output") -->
+  <rect class="d-data" x="16" y="192" width="436" height="84" rx="10"/>
+  <text class="d-t d-acc" x="30" y="215">Our leveler &#183; one copy per app</text>
+  <path class="d-div" d="M159 226 V268 M309 226 V268"/>
+  <text class="d-d" x="84" y="245" text-anchor="middle">28 &#8594; 25</text>
+  <text class="d-dn" x="84" y="266" text-anchor="middle">turned down</text>
+  <text class="d-d" x="234" y="245" text-anchor="middle">35 &#8594; 25</text>
+  <text class="d-dn" x="234" y="266" text-anchor="middle">turned down</text>
+  <text class="d-d" x="384" y="245" text-anchor="middle">17</text>
+  <text class="d-m" x="384" y="266" text-anchor="middle">left alone</text>
+
+  <path class="d-flow" d="M84 276 V305" marker-end="url(#d-arrow)"/>
+  <path class="d-flow" d="M234 276 V305" marker-end="url(#d-arrow)"/>
+  <path class="d-flow" d="M384 276 V305" marker-end="url(#d-arrow)"/>
+
+  <rect class="d-box" x="16" y="306" width="436" height="44" rx="10"/>
+  <text class="d-t" x="234" y="334" text-anchor="middle">All apps mixed together</text>
+  <path class="d-flow" d="M234 350 V375" marker-end="url(#d-arrow)"/>
+
+  <rect class="d-box" x="16" y="376" width="436" height="44" rx="10"/>
+  <text class="d-t" x="234" y="404" text-anchor="middle">Realtek + Sound Research effects</text>
+  <path class="d-flow" d="M234 420 V445" marker-end="url(#d-arrow)"/>
+
+  <!-- ours: the safety cap on the total -->
+  <rect class="d-data" x="16" y="446" width="436" height="60" rx="10"/>
+  <text class="d-t d-acc" x="30" y="471">Our safety cap</text>
+  <text class="d-d" x="30" y="495">on the total, for sudden bangs</text>
+
+  <path class="d-flow" d="M234 506 V545" marker-end="url(#d-arrow)"/>
+
+  <!-- after the engine -->
+  <rect class="d-box" x="84" y="546" width="300" height="42" rx="10"/>
+  <text class="d-t" x="234" y="573" text-anchor="middle">Realtek driver</text>
+  <path class="d-flow" d="M234 588 V613" marker-end="url(#d-arrow)"/>
+
+  <rect class="d-box" x="84" y="614" width="300" height="90" rx="10"/>
+  <text class="d-t" x="100" y="640">Sound chip volume</text>
+  <path class="d-track" d="M306 632 H366"/>
+  <circle class="d-slide-knob" cx="344" cy="632" r="7"/>
+  <path class="d-ico d-ico-i" d="M322 647 H354 M326 643 L321 647 L326 651 M350 643 L355 647 L350 651"/>
+  <text class="d-d" x="100" y="668">= your Windows volume slider</text>
+  <text class="d-m" x="100" y="690">stays free: you play with it</text>
+  <path class="d-flow" d="M234 704 V729" marker-end="url(#d-arrow)"/>
+
+  <rect class="d-box" x="84" y="730" width="300" height="58" rx="10"/>
+  <text class="d-t" x="100" y="756">Headphones</text>
+  <text class="d-m" x="100" y="778">static, at max</text>
+
+  <!-- the tray app: on/off and the cap -->
+  <rect class="d-tray" x="488" y="192" width="160" height="160" rx="10"/>
+  <text class="d-t d-ora" x="502" y="218">Tray app</text>
+  <rect class="d-toggle" x="502" y="232" width="38" height="22" rx="11"/>
+  <circle class="d-knob" cx="529" cy="243" r="8"/>
+  <text class="d-d d-ora d-b" x="548" y="249">on</text>
+  <text class="d-cap d-ora" x="502" y="290">cap = 25</text>
+  <text class="d-m" x="502" y="318">shows what was</text>
+  <text class="d-m" x="502" y="340">turned down</text>
+
+  <path class="d-ctl" d="M488 234 H454" marker-end="url(#d-arrow-o)"/>
+  <path class="d-ctl" d="M568 352 V466 Q568 476 558 476 H454" marker-end="url(#d-arrow-o)"/>
+</svg>

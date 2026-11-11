@@ -1,0 +1,61 @@
+# Sound Protection: what git leaves out.
+# Rule: track what people write; leave out what a tool can make again.
+
+# --- Builds -----------------------------------------------------------------
+# .NET build output (dotnet build / dotnet test), in every project.
+[Bb]in/
+[Oo]bj/
+
+# Published tray app. The running tray is dist\SoundProtection.exe.
+# Rebuilt with dotnet publish -o dist-staging (plugin plan, Task 4 Step 6).
+/dist/
+/dist-staging/
+
+# Native plug-in build: native\build-apo.cmd and native\build-dsp.cmd write here.
+# The installer's default DLL source is native\out\apo\SoundProtection.Apo.dll.
+/native/out/
+
+# MSVC leftovers, in case a compile ever lands outside native\out.
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.iobj
+*.ipdb
+*.idb
+*.pch
+*.ipch
+*.tlog
+
+# --- Agent task scratch -------------------------------------------------------
+# Subagent task folders: briefs, reports, reviews, package diffs and source
+# snapshots. Git history takes over the snapshots' job from here on.
+# The plan and ledger .md files next to them stay tracked.
+docs/superpowers/plans/*.work/
+
+# --- Test runs ----------------------------------------------------------------
+TestResults/
+*.trx
+*.coverage
+*.coveragexml
+
+# --- Editors and IDEs ---------------------------------------------------------
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+# --- Claude Code per-user settings (a shared .claude/settings.json stays) ----
+.claude/settings.local.json
+
+# --- Logs and temp files ------------------------------------------------------
+*.log
+*.tmp
+~$*
+
+# --- Windows ------------------------------------------------------------------
+Thumbs.db
+ehthumbs.db
+desktop.ini
+$RECYCLE.BIN/
