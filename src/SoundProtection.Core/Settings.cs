@@ -7,6 +7,13 @@ public sealed class Settings
     public const double MinCeilingDb = -80.0;
     public const double MaxCeilingDb = 0.0;
 
+    /// <summary>The range of the bass and treble caps. The right end, 0 dB, is Off.</summary>
+    public const double MinBandCapDb = -60.0;
+    public const double MaxBandCapDb = 0.0;
+
+    /// <summary>The bass and treble cap that a new, or an older, settings file gets: Off.</summary>
+    public const double DefaultBandCapDb = 0.0;
+
     /// <summary>
     /// The version of the settings file. 1 (or no version) was the ear-level build, where <c>CeilingDb</c> was a level at the ear.
     /// 2 is the build with the plug-in, where it is the cap before the volume slider.
@@ -31,6 +38,15 @@ public sealed class Settings
 
     /// <summary>False switches the plug-in's protection off. The plug-in stays in line and passes sound through.</summary>
     public bool ProtectionEnabled { get; set; } = true;
+
+    /// <summary>
+    /// The bass cap, in dB from -60 to 0: when the deep part of the sound goes over this level, only that part is turned down.
+    /// 0 is Off. A settings file from before the bass cap has no value, so it gets Off.
+    /// </summary>
+    public double BassCapDb { get; set; } = DefaultBandCapDb;
+
+    /// <summary>The treble cap, in dB from -60 to 0, the same way as <see cref="BassCapDb"/>: when the high part goes over it, only that part is turned down. 0 is Off.</summary>
+    public double TrebleCapDb { get; set; } = DefaultBandCapDb;
 
     public Settings Clone() => (Settings)MemberwiseClone();
 }
@@ -70,6 +86,8 @@ public sealed class SettingsStore
             }
 
             settings.CeilingDb = Math.Clamp(settings.CeilingDb, Settings.MinCeilingDb, Settings.MaxCeilingDb);
+            settings.BassCapDb = ClampBandCap(settings.BassCapDb);
+            settings.TrebleCapDb = ClampBandCap(settings.TrebleCapDb);
             return settings;
         }
         catch (JsonException)
@@ -99,6 +117,10 @@ public sealed class SettingsStore
     }
 
     private static Settings Fresh() => new() { SettingsVersion = Settings.CurrentVersion };
+
+    // A cap outside the range is held to it, and one that is not a number is Off.
+    private static double ClampBandCap(double capDb) =>
+        double.IsNaN(capDb) ? Settings.DefaultBandCapDb : Math.Clamp(capDb, Settings.MinBandCapDb, Settings.MaxBandCapDb);
 
     private void KeepBadFile()
     {

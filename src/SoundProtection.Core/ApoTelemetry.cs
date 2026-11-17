@@ -42,7 +42,11 @@ public sealed record TelemetryHeader(
     public bool Enabled => (Flags & 0x4) != 0;
 }
 
-/// <summary>One running effect: a Leveler on one stream, or the Safety Cap on the whole mix.</summary>
+/// <summary>
+/// One running effect: a Leveler on one stream, or the Safety Cap on the whole mix. <c>BassCutDb</c> and <c>TrebleCutDb</c>
+/// are how far the Safety Cap is turning each band down now (0 or more); a Leveler's are always 0, and a slot that is
+/// built without them has none.
+/// </summary>
 public sealed record TelemetrySlot(
     SlotKind Kind,
     uint InstanceId,
@@ -55,7 +59,9 @@ public sealed record TelemetrySlot(
     float InputDb,
     float GainReductionDb,
     float MaxGainReductionDb,
-    float OutputPeakDb);
+    float OutputPeakDb,
+    float BassCutDb = 0f,
+    float TrebleCutDb = 0f);
 
 /// <summary>The header and the slots that are in use. Free slots are left out.</summary>
 public sealed record TelemetrySnapshot(TelemetryHeader Header, IReadOnlyList<TelemetrySlot> Slots);
@@ -119,7 +125,9 @@ public static class ApoTelemetry
                 InputDb: BinaryPrimitives.ReadSingleLittleEndian(slot[40..]),
                 GainReductionDb: BinaryPrimitives.ReadSingleLittleEndian(slot[44..]),
                 MaxGainReductionDb: BinaryPrimitives.ReadSingleLittleEndian(slot[48..]),
-                OutputPeakDb: BinaryPrimitives.ReadSingleLittleEndian(slot[52..])));
+                OutputPeakDb: BinaryPrimitives.ReadSingleLittleEndian(slot[52..]),
+                BassCutDb: BinaryPrimitives.ReadSingleLittleEndian(slot[56..]),
+                TrebleCutDb: BinaryPrimitives.ReadSingleLittleEndian(slot[60..])));
         }
 
         return new TelemetrySnapshot(header, slots);

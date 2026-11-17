@@ -4,9 +4,10 @@ using SoundProtection.Core;
 namespace SoundProtection.App;
 
 /// <summary>
-/// The panel: which output the sound goes to, the cap, apps and events, and the live level. With the plug-in in place the
-/// level is the loudest sound before the volume slider and the status line says what protection is doing; without it the
-/// level is the one at the ear and alerts are all there is.
+/// The panel: which output the sound goes to, the cap, the bass and treble caps, apps and events, and the live level. With the
+/// plug-in in place the level is the loudest sound before the volume slider, the status line says what protection is doing, and
+/// each of the bass and treble caps says how much it is turning its band down; without it the level is the one at the ear and
+/// alerts are all there is.
 /// </summary>
 internal sealed class PanelForm : Form
 {
@@ -34,6 +35,12 @@ internal sealed class PanelForm : Form
     private readonly Label _hold = new();
     private readonly NumericUpDown _ceiling = new();
     private readonly CeilingSlider _slider = new();
+    private readonly CeilingSlider _bassSlider = new();
+    private readonly CeilingSlider _trebleSlider = new();
+    private readonly Label _bassValue = new();
+    private readonly Label _trebleValue = new();
+    private readonly Label _bassCut = new(); // "cutting 4.0 dB" while the plug-in is turning the band down; blank otherwise
+    private readonly Label _trebleCut = new();
     private readonly Button _toneButton = new();
     private readonly Label _toneHint = new();
     private readonly Button _useHold = new();
@@ -62,7 +69,7 @@ internal sealed class PanelForm : Form
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(600, 650);
+        ClientSize = new Size(600, 734); // the two band rows are 42 px each: the list of events keeps the room it had
         DoubleBuffered = true;
 
         var root = new TableLayoutPanel
@@ -151,6 +158,8 @@ internal sealed class PanelForm : Form
         statsRow.Controls.Add(_useHold, 3, 0);
         AddRow(root, statsRow);
 
+        AddRow(root, BandRows());
+
         Restyle(_limiter, 9.5f, FontStyle.Regular, ColAmber);
         _limiter.Text = StatusUnknown;
         _limiter.MaximumSize = new Size(560, 0);
@@ -230,6 +239,16 @@ internal sealed class PanelForm : Form
 
             CeilingChanged?.Invoke(db);
         };
+        _bassSlider.ValueChanged += db =>
+        {
+            _bassValue.Text = BandText.Value(db);
+            BassChanged?.Invoke(db);
+        };
+        _trebleSlider.ValueChanged += db =>
+        {
+            _trebleValue.Text = BandText.Value(db);
+            TrebleChanged?.Invoke(db);
+        };
         _toneButton.Click += (_, _) => PlayTestTone?.Invoke();
         _useHold.Click += (_, _) => UseHoldAsCeiling?.Invoke();
         FormClosing += (_, e) =>
@@ -243,6 +262,12 @@ internal sealed class PanelForm : Form
     }
 
     public event Action<double>? CeilingChanged;
+
+    /// <summary>Raised with the new bass cap, in dB (0 is Off), only when the user moves the slider.</summary>
+    public event Action<double>? BassChanged;
+
+    /// <summary>Raised with the new treble cap, in dB (0 is Off), only when the user moves the slider.</summary>
+    public event Action<double>? TrebleChanged;
 
     public event Action<bool>? AlertsChanged;
 
@@ -285,6 +310,13 @@ internal sealed class PanelForm : Form
         {
             _quiet = false;
         }
+    }
+
+    /// <summary>Sets the bass and treble sliders and their words, in dB (0 is Off). Raises no events.</summary>
+    public void SetBands(double bassCapDb, double trebleCapDb)
+    {
+        ShowBand(_bassSlider, _bassValue, bassCapDb);
+        ShowBand(_trebleSlider, _trebleValue, trebleCapDb);
     }
 
     public void SetAlerts(bool on) => SetAlertsInternal(on, raise: false);
@@ -352,6 +384,8 @@ internal sealed class PanelForm : Form
 
         _meter.Set(s.DisplayDb, s.HoldDb, s.CeilingDb, s.Over);
         _hold.Text = "Last 10 s peak: " + Db.Format(s.HoldDb);
+        _bassCut.Text = ""; // the band caps work in the plug-in, so there is nothing to say about them here
+        _trebleCut.Text = "";
         _apps.Text = s.Apps.Count == 0
             ? "Playing now: nothing"
             : "Playing now: " + string.Join("     ", s.Apps.Take(4).Select(a => a.Name + " " + Db.Format(a.EarDb)));
@@ -368,6 +402,8 @@ internal sealed class PanelForm : Form
 
         _meter.Set(p.LoudestInputDb, Db.Floor, s.CeilingDb, turnedDown);
         _hold.Text = "Last 10 s peak at your ear: " + Db.Format(s.HoldDb);
+        _bassCut.Text = BandText.Cut(p.BassCutDb);
+        _trebleCut.Text = BandText.Cut(p.TrebleCutDb);
         _apps.Text = ProtectionText.PlayingNow(p);
     }
 
@@ -463,6 +499,58 @@ internal sealed class PanelForm : Form
         {
             AlertsChanged?.Invoke(on);
         }
+    }
+
+    // The bass and treble caps: each holds one band of the sound to its own level, and all the way right (0 dB) is off.
+    // One row each: the band's name, the slider, what the slider says, and how much the band is being turned down now.
+    private TableLayoutPanel BandRows()
+    {
+        var table = Row(
+            new ColumnStyle(SizeType.AutoSize),
+            new ColumnStyle(SizeType.Percent, 100f),
+            new ColumnStyle(SizeType.AutoSize),
+            new ColumnStyle(SizeType.AutoSize));
+        table.RowCount = 2;
+        table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+        AddBand(table, 0, "Bass", _bassSlider, _bassValue, _bassCut, BandText.BassTip);
+        AddBand(table, 1, "Treble", _trebleSlider, _trebleValue, _trebleCut, BandText.TrebleTip);
+        return table;
+    }
+
+    // The two columns of words are given room for the longest words they will show, measured in their own font, so that the sliders
+    // keep their size as the words come and go, and nothing is cut off whatever the text size.
+    private void AddBand(TableLayoutPanel table, int index, string name, CeilingSlider slider, Label value, Label cut, string tip)
+    {
+        var label = MakeLabel(name, 9.5f, FontStyle.Regular, ColMuted);
+        label.Anchor = AnchorStyles.Left;
+        label.Margin = new Padding(0, 2, 10, 2);
+        table.Controls.Add(label, 0, index);
+
+        slider.Dock = DockStyle.Fill;
+        slider.Margin = new Padding(0, 2, 0, 2);
+        slider.Value = Settings.DefaultBandCapDb; // Off, until SetBands says otherwise
+        table.Controls.Add(slider, 1, index);
+        _tips.SetToolTip(slider, tip);
+
+        Restyle(value, 9.5f, FontStyle.Regular, ColText);
+        value.Text = BandText.Value(Settings.DefaultBandCapDb);
+        value.Anchor = AnchorStyles.Left;
+        value.Margin = new Padding(10, 2, 0, 2);
+        value.MinimumSize = new Size(TextRenderer.MeasureText("-60.0 dB", value.Font).Width, 0);
+        table.Controls.Add(value, 2, index);
+
+        Restyle(cut, 9f, FontStyle.Regular, ColMuted);
+        cut.Anchor = AnchorStyles.Left;
+        cut.MinimumSize = new Size(TextRenderer.MeasureText("cutting 99.9 dB", cut.Font).Width, 0);
+        table.Controls.Add(cut, 3, index);
+    }
+
+    private static void ShowBand(CeilingSlider slider, Label value, double capDb)
+    {
+        slider.Value = capDb; // held to the slider's range, and raises nothing
+        value.Text = BandText.Value(slider.Value);
     }
 
     private static Label MakeLabel(string text, float size, FontStyle style, Color color)

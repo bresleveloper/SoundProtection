@@ -63,6 +63,15 @@ internal sealed class TelemetryBuffer
         return this;
     }
 
+    /// <summary>The two floats V2 put in what were the last 8 reserved bytes of a slot: the bass cut at 56 and the treble cut at 60.</summary>
+    public TelemetryBuffer SlotCuts(int index, float bassCutDb, float trebleCutDb)
+    {
+        var o = HeaderBytes + index * SlotBytes;
+        F32(o + 56, bassCutDb);
+        F32(o + 60, trebleCutDb);
+        return this;
+    }
+
     public TelemetryBuffer U32(int offset, uint value)
     {
         BinaryPrimitives.WriteUInt32LittleEndian(Bytes.AsSpan(offset), value);
@@ -154,6 +163,29 @@ public sealed class ApoTelemetryTests : IDisposable
         Assert.Equal(2.5f, cap.GainReductionDb);
         Assert.Equal(3.0f, cap.MaxGainReductionDb);
         Assert.Equal(-8.25f, cap.OutputPeakDb);
+    }
+
+    [Fact]
+    public void Parse_ReadsBandCuts()
+    {
+        var buffer = new TelemetryBuffer()
+            .Header(4242, 42, 5, Beat.ToFileTimeUtc(), flags: 5, capDb: -20.0f, ceilingDb: -8.0f)
+            .Slot(0, 2, 2, 48000, 2, 1, 0, 1, Process.ToFileTimeUtc(), -9.0f, 2.5f, 3.0f, -8.25f)
+            .SlotCuts(0, bassCutDb: 3.5f, trebleCutDb: 4.25f)
+            .Slot(1, 1, 1, 48000, 2, 1, 0, 1, Process.ToFileTimeUtc(), -14.5f, 6.25f, 7.5f, -20.5f); // a Leveler, or any slot an older plug-in wrote: 0 in those bytes
+
+        var snapshot = ApoTelemetry.Parse(buffer.Bytes);
+
+        Assert.NotNull(snapshot);
+        var cap = snapshot.Slots[0];
+        Assert.Equal(SlotKind.SafetyCap, cap.Kind);
+        Assert.Equal(3.5f, cap.BassCutDb);
+        Assert.Equal(4.25f, cap.TrebleCutDb);
+        Assert.Equal(-8.25f, cap.OutputPeakDb); // the field just before them is not disturbed
+
+        var leveler = snapshot.Slots[1];
+        Assert.Equal(0.0f, leveler.BassCutDb);
+        Assert.Equal(0.0f, leveler.TrebleCutDb);
     }
 
     [Theory]

@@ -2,6 +2,7 @@
 //
 //   Leveler    turns a loud stream down to a loudness cap (ITU-R BS.1770 momentary loudness, slow gain).
 //   SafetyCap  look-ahead true-peak limiter with a hard final clamp, one gain for all channels.
+//   BandGuard  bass and treble caps (V2): a cut-only band filter per cap, exact copy when idle, no latency, no allocation.
 //
 // Rules this library keeps (they are what protects the listener's ears):
 //   * Every gain is <= 1. Nothing is ever made louder than its input.
@@ -858,6 +859,247 @@ private:
     float outPeakDb_ = kFloorDb;
     float grDb_ = 0.0f;
     std::uint32_t hits_ = 0;
+};
+
+// ------------------------------------------------------------------------------------------------
+// BandGuard: bass and treble caps (V2)
+// ------------------------------------------------------------------------------------------------
+
+struct BandGuardParams {
+    bool  enabled     = true;   // the global switch (config.bin "on"); false releases both cuts to 0
+    bool  bassOn      = false;
+    float bassCapDb   = 0.0f;   // dB re a full-scale sine; clamped to [-60, 0]; NaN and +-Inf keep the old value
+    bool  trebleOn    = false;
+    float trebleCapDb = 0.0f;   // the same
+};
+
+// A cap for the bass of the sound and a cap for the treble, and nothing else is touched. A band that is over its cap is
+// turned down by the excess (the limiter rule), by at most 12 dB, and only inside its own frequency range. A band that is
+// off, or under its cap, leaves the output a bit-for-bit copy of the input.
+//
+// Each band is a cut-only filter   y = x - c * bp(x)   where bp is a unity-peak second-order band-pass (Simper trapezoidal
+// state-variable filter, Q 0.6; bass centred at 160 Hz, treble at 3500 Hz) and c, 0 <= c < 1, follows the band's level.
+// For a band-pass H with H(centre) = 1,   |1 - c*H|^2 = 1 - c*(2 - c)*|H|^2 <= 1   at every frequency: whatever c does, no
+// frequency is ever made louder. At the centre the cut is exactly gr dB when c = 1 - 10^(-gr/20). The poles never move, so a
+// changing cut cannot ring or click the way a moving filter would, and there is no delay.
+//
+//   * Level: the mean square of the band-pass output (of the loudest channel) through a one-pole detector, in dB relative to
+//     a full-scale sine (an amplitude-A sine at the band's centre reads 20*log10(A)). Over the cap the cut aims at the
+//     excess in dB, up to kMaxCutDb; at or under the cap, or when the band is off, it aims at 0.
+//   * One cut per band for all channels, driven by the loudest one, so the stereo image holds.
+//   * The cut rises with a one-pole attack and falls with a one-pole release. A cut that falls to kSnapDb or less on its
+//     way to 0 snaps to exactly 0, which brings back the exact copy (a plain one-pole never gets there).
+//   * The treble band works on what the bass band left. When both cuts are 0 the output is the sanitised input sample
+//     itself, not a recomputed one.
+//   * The detector input is capped at kMaxDetectPower, so a burst of absurd samples (up to FLT_MAX) cannot keep a cut
+//     engaged for minutes: the cut is at its maximum anyway, and it then releases on the usual time scale.
+//   * All state is in fixed member arrays for 64 channels, so no call allocates, not even Prepare.
+//   * Not prepared (Prepare never called, or its format was refused): Process copies frames x (the channel count of the last
+//     Prepare call) samples, NaN and Inf as 0 and every other sample unchanged, with no cut. With an unknown channel count it
+//     writes nothing, like the Leveler and the SafetyCap. It does not clamp: the limiter behind the guard owns the ceiling.
+class BandGuard {
+public:
+    static constexpr double kBassHz = 160.0, kTrebleHz = 3500.0, kQ = 0.6, kMaxCutDb = 12.0;
+    static constexpr double kBassDetectMs = 25.0, kBassAttackMs = 20.0, kBassReleaseMs = 300.0;
+    static constexpr double kTrebleDetectMs = 5.0, kTrebleAttackMs = 5.0, kTrebleReleaseMs = 150.0;
+    static constexpr double kSnapDb = 0.01, kMaxDetectPower = 1.0e4;
+    static constexpr float  kMinCapDb = -60.0f, kMaxCapDb = 0.0f;
+
+    // Never allocates and cannot throw. Keeps the parameters from earlier SetParams calls; the filter, detector and cut
+    // state restart from zero. A refused format leaves the guard unprepared: Process then fails closed (see above) over the
+    // channel count given here.
+    void Prepare(std::uint32_t sampleRate, std::uint32_t channels) noexcept {
+        ready_ = false;
+        failClosedChannels_ = detail::FailClosedChannels(channels);   // first of all, whatever the rest of this call does
+        channels_ = 0;
+        Reset();                                                  // no stale cut behind, even when the format is refused
+        if (!detail::FormatOk(sampleRate, channels)) return;
+        const double fs = static_cast<double>(sampleRate);
+        SetupBand(bass_, kBassHz, kBassDetectMs, kBassAttackMs, kBassReleaseMs, fs);
+        SetupBand(treble_, kTrebleHz, kTrebleDetectMs, kTrebleAttackMs, kTrebleReleaseMs, fs);
+        channels_ = channels;
+        ready_ = true;
+    }
+
+    // Clears the filter, detector and cut state of both bands. Keeps the parameters.
+    void Reset() noexcept {
+        ClearState(bass_);
+        ClearState(treble_);
+    }
+
+    // Real-time safe. Caps are clamped to [kMinCapDb, kMaxCapDb]; a cap that is not finite (NaN, +-Inf) is ignored and the
+    // old one stays, as for the parameters of the other classes here. Unchanged values do nothing. A band is active when
+    // `enabled` and its own switch are both on; an inactive band aims its cut at 0, so the cut falls on the band's release
+    // time and the output becomes an exact copy again once it has snapped to 0.
+    void SetParams(const BandGuardParams& p) noexcept {
+        const BandGuardParams s = Sanitise(p, params_);
+        if (Same(s, params_)) return;
+        params_ = s;
+        bass_.active = s.enabled && s.bassOn;
+        treble_.active = s.enabled && s.trebleOn;
+        bass_.thrMs = CapToMeanSquare(s.bassCapDb);
+        treble_.thrMs = CapToMeanSquare(s.trebleCapDb);
+    }
+
+    // Real-time safe; in == out allowed (the whole frame is read before any of it is written). Interleaved samples.
+    // Not prepared: fails closed instead (see above).
+    void Process(const float* in, float* out, std::uint32_t frames) noexcept {
+        if (in == nullptr || out == nullptr || frames == 0) return;
+        if (!ready_) {
+            FailClosed(in, out, frames);
+            return;
+        }
+        const std::size_t ch = channels_;
+        const double fltMax = static_cast<double>(std::numeric_limits<float>::max());
+        for (std::uint32_t f = 0; f < frames; ++f) {
+            const float* src = in + static_cast<std::size_t>(f) * ch;
+            float* dst = out + static_cast<std::size_t>(f) * ch;
+
+            for (std::size_t c = 0; c < ch; ++c) {                // the whole frame in, NaN and Inf as 0
+                const float x = detail::Sanitize(src[c]);
+                x_[c] = x;
+                v_[c] = static_cast<double>(x);
+            }
+            StepBand(bass_, v_);                                  // bass first, then the treble band on what it left
+            StepBand(treble_, v_);
+
+            if (bass_.cut == 0.0 && treble_.cut == 0.0) {
+                for (std::size_t c = 0; c < ch; ++c) dst[c] = x_[c];   // idle: the input sample itself, bit for bit
+            } else {
+                // A cut is at work. The result is finite by construction; the clamp keeps even a +-FLT_MAX input, whose
+                // band-pass overshoot can leave the float range by a hair, from turning into Inf in the conversion.
+                for (std::size_t c = 0; c < ch; ++c)
+                    dst[c] = static_cast<float>(std::min(std::max(v_[c], -fltMax), fltMax));
+            }
+        }
+    }
+
+    float BassCutDb() const noexcept { return static_cast<float>(bass_.cutDb); }        // current cut in dB, >= 0
+    float TrebleCutDb() const noexcept { return static_cast<float>(treble_.cutDb); }
+    std::uint32_t LatencyFrames() const noexcept { return 0; }
+
+private:
+    static constexpr double kInvQ = 1.0 / kQ;                 // the SVF's damping k; k * (band output) is the unity-peak band-pass
+    static constexpr double kFlush = 1.0e-30;                 // states and levels below this decay into denormals: flushed to 0
+
+    // One band: its filter, its level detector and its cut.
+    struct Band {
+        // Set by SetParams; Prepare and Reset keep them.
+        bool active = false;                                  // enabled && on
+        double thrMs = 0.5;                                   // the cap as a mean square: 0.5 * 10^(capDb/10); 0.5 is 0 dB
+        // Set by Prepare; Reset keeps them.
+        double a1 = 0.0, a2 = 0.0, a3 = 0.0;                  // SVF coefficients
+        double detCoef = 1.0, attCoef = 1.0, relCoef = 1.0;   // one-pole coefficients: detector, cut attack, cut release
+        // State: cleared by Prepare and Reset.
+        double ic1[detail::kMaxChannels] = {};                // the two SVF integrator states per channel
+        double ic2[detail::kMaxChannels] = {};
+        double meanSq = 0.0;                                  // the detector: smoothed mean square of the band-pass output
+        double cutDb = 0.0;                                   // gr: the cut, dB, >= 0
+        double cut = 0.0;                                     // c = 1 - 10^(-gr/20), exactly 0 when gr is 0
+    };
+
+    static void ClearState(Band& b) noexcept {
+        for (std::uint32_t i = 0; i < detail::kMaxChannels; ++i) {
+            b.ic1[i] = 0.0;
+            b.ic2[i] = 0.0;
+        }
+        b.meanSq = 0.0;
+        b.cutDb = 0.0;
+        b.cut = 0.0;
+    }
+
+    // Simper's trapezoidal SVF, band-pass output: g = tan(pi*f0/fs), k = 1/Q, and the three coefficients below. Its
+    // response at f0 is 1/k, so k times the band output has unity gain there (the bilinear transform is pre-warped at f0).
+    static void SetupBand(Band& b, double hz, double detectMs, double attackMs, double releaseMs, double fs) noexcept {
+        const double g = std::tan(detail::kPi * hz / fs);
+        b.a1 = 1.0 / (1.0 + g * (g + kInvQ));
+        b.a2 = g * b.a1;
+        b.a3 = g * b.a2;
+        b.detCoef = detail::OnePoleCoef(detectMs, fs);
+        b.attCoef = detail::OnePoleCoef(attackMs, fs);
+        b.relCoef = detail::OnePoleCoef(releaseMs, fs);
+    }
+
+    // The cap in dB re a full-scale sine as a mean square: a full-scale sine has 0.5, so 0.5 * 10^(capDb/10).
+    static double CapToMeanSquare(float capDb) noexcept {
+        return 0.5 * detail::DbToLinD(2.0 * static_cast<double>(capDb));
+    }
+
+    // One frame of one band. v[0..channels) is the band's input and becomes its output (input minus c times band-pass).
+    void StepBand(Band& b, double* v) noexcept {
+        const std::size_t ch = channels_;
+
+        // The filter, on every channel, whether or not the band is active, so that switching a band on finds a warm
+        // detector and a filter that already knows the sound. loudest is the largest bp^2 over the channels.
+        double loudest = 0.0;
+        for (std::size_t c = 0; c < ch; ++c) {
+            const double ic1 = b.ic1[c];
+            const double ic2 = b.ic2[c];
+            const double v3 = v[c] - ic2;
+            const double v1 = b.a1 * ic1 + b.a2 * v3;
+            const double v2 = ic2 + b.a2 * ic1 + b.a3 * v3;
+            const double n1 = 2.0 * v1 - ic1;
+            const double n2 = 2.0 * v2 - ic2;
+            b.ic1[c] = std::fabs(n1) < kFlush ? 0.0 : n1;         // after long silence the states decay into the denormal range
+            b.ic2[c] = std::fabs(n2) < kFlush ? 0.0 : n2;
+            const double bp = kInvQ * v1;
+            bp_[c] = bp;
+            loudest = std::max(loudest, bp * bp);
+        }
+
+        // The detector. Capped input (see the class comment); no thresholds depend on the flush below (the lowest one is
+        // 5e-7), it only keeps the level from sitting in the denormal range for ever after long digital silence.
+        b.meanSq += b.detCoef * (std::min(loudest, kMaxDetectPower) - b.meanSq);
+        if (b.meanSq < kFlush) b.meanSq = 0.0;
+
+        // The cut. Aim: the excess over the cap in dB, at most kMaxCutDb; 0 when under the cap or when the band is off.
+        // No log10 unless the band is over its cap.
+        double target = 0.0;
+        if (b.active && b.meanSq > b.thrMs) target = std::min(10.0 * std::log10(b.meanSq / b.thrMs), kMaxCutDb);
+        b.cutDb += (target - b.cutDb) * (target > b.cutDb ? b.attCoef : b.relCoef);
+        if (target == 0.0 && b.cutDb <= kSnapDb) b.cutDb = 0.0;  // exactly 0 again, so the output is an exact copy again
+        b.cut = b.cutDb > 0.0 ? 1.0 - detail::DbToLinD(-b.cutDb) : 0.0;   // no exp unless a cut is in force
+
+        // This frame already uses the new cut. A band without a cut passes its input on untouched.
+        if (b.cut != 0.0)
+            for (std::size_t c = 0; c < ch; ++c) v[c] -= b.cut * bp_[c];
+    }
+
+    // Process on a guard that is not prepared: NaN and Inf become 0, every other sample is copied as it is. No cut, no
+    // delay. failClosedChannels_ == 0: the size of the buffer is unknown and nothing is written.
+    void FailClosed(const float* in, float* out, std::uint32_t frames) const noexcept {
+        const std::size_t n = static_cast<std::size_t>(frames) * failClosedChannels_;
+        for (std::size_t i = 0; i < n; ++i) {
+            const float x = in[i];                                // read before out[i] is written: in == out is safe
+            out[i] = detail::Sanitize(x);
+        }
+    }
+
+    static BandGuardParams Sanitise(const BandGuardParams& p, const BandGuardParams& old) noexcept {
+        BandGuardParams s = old;
+        s.enabled = p.enabled;
+        s.bassOn = p.bassOn;
+        s.trebleOn = p.trebleOn;
+        if (detail::IsFinite(p.bassCapDb)) s.bassCapDb = detail::ClampF(p.bassCapDb, kMinCapDb, kMaxCapDb);
+        if (detail::IsFinite(p.trebleCapDb)) s.trebleCapDb = detail::ClampF(p.trebleCapDb, kMinCapDb, kMaxCapDb);
+        return s;
+    }
+    static bool Same(const BandGuardParams& a, const BandGuardParams& b) noexcept {
+        return a.enabled == b.enabled && a.bassOn == b.bassOn && a.bassCapDb == b.bassCapDb &&
+               a.trebleOn == b.trebleOn && a.trebleCapDb == b.trebleCapDb;
+    }
+
+    bool ready_ = false;
+    std::uint32_t channels_ = 0;
+    std::uint32_t failClosedChannels_ = 0;   // channels of the last Prepare call (1..65535), 0 = unknown; read only while unprepared
+    BandGuardParams params_;
+    Band bass_;
+    Band treble_;
+
+    // Per-frame scratch, shared by the two bands.
+    float x_[detail::kMaxChannels] = {};     // the sanitised input frame (what an idle guard writes)
+    double v_[detail::kMaxChannels] = {};    // the band's input, then its output
+    double bp_[detail::kMaxChannels] = {};   // the band-pass output of the band being stepped
 };
 
 }  // namespace sp

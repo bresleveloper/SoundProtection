@@ -12,13 +12,13 @@ internal sealed record ProtectionView(ProtectionState State, IReadOnlyList<strin
 /// Runs two background threads. The sampler reads the watched output every few milliseconds, feeds the engine, and keeps
 /// the latest <see cref="PanelState"/> (the ear-level display); over-ceiling events are posted to the UI context.
 /// The protection thread, ten times a second, reads the plug-in's telemetry, and every 2 s checks the registry; it keeps the
-/// latest <see cref="ProtectionView"/>, and turn-down events are posted to the UI context. It also keeps config.bin equal to
-/// the settings. Nothing here blocks the UI thread.
+/// latest <see cref="ProtectionView"/>, and turn-down events are posted to the UI context. It also keeps config.bin and
+/// bands.bin equal to the settings. Nothing here blocks the UI thread.
 /// </summary>
 internal sealed class Sampler : IDisposable
 {
     private const int ProtectionTickMs = 100;
-    private static readonly TimeSpan SlowTick = TimeSpan.FromSeconds(2);          // registry facts, and the check that config.bin is right
+    private static readonly TimeSpan SlowTick = TimeSpan.FromSeconds(2);          // registry facts, and the check that config.bin and bands.bin are right
     private static readonly TimeSpan ReadingMaxAge = TimeSpan.FromSeconds(1);
 
     private readonly IAudioSource _source;
@@ -59,8 +59,8 @@ internal sealed class Sampler : IDisposable
     public event Action<TurnDownEvent>? TurnedDown;
 
     /// <summary>
-    /// Asks for config.bin to be brought up to date with the settings. Returns at once; the protection thread does the write.
-    /// Call it after the new settings are in place. Several requests close together become one write.
+    /// Asks for config.bin and bands.bin to be brought up to date with the settings. Returns at once; the protection thread does
+    /// the write. Call it after the new settings are in place. Several requests close together become one write.
     /// </summary>
     public void RequestConfigWrite() => Volatile.Write(ref _configDirty, 1);
 
@@ -128,6 +128,7 @@ internal sealed class Sampler : IDisposable
     private void ProtectionLoop()
     {
         var writer = new ProtectionConfigWriter(ProtectionPaths.ConfigPath);
+        var bandsWriter = new BandsConfigWriter(ProtectionPaths.BandsPath);
         var health = new HealthTracker();
         RegistryFacts? facts = null;
         var nextSlow = DateTimeOffset.MinValue;
@@ -149,11 +150,13 @@ internal sealed class Sampler : IDisposable
                     RequestConfigWrite();
                 }
 
-                StartConfigSyncIfNeeded(writer);
+                StartConfigSyncIfNeeded(writer, bandsWriter);
 
                 if (facts is not null)
                 {
-                    _protection = Evaluate(facts, _settings(), health, writer.LastAttemptFailed, now);
+                    // Either file failing to save means the plug-in may not have the settings.
+                    var settingsNotSaved = writer.LastAttemptFailed || bandsWriter.LastAttemptFailed;
+                    _protection = Evaluate(facts, _settings(), health, settingsNotSaved, now);
                 }
             }
             catch (Exception ex)
@@ -195,9 +198,10 @@ internal sealed class Sampler : IDisposable
     }
 
     // A write can take half a second when the plug-in has the file open, so it runs on the thread pool, one at a time.
+    // config.bin and then bands.bin are written in the same work item, each in its own try, so that one failing does not stop the other.
     // A request that comes in while a write is running stays pending and is picked up by the next tick. The settings are read
     // after the request is taken, so a change that raced with this tick is either written now or requests another write.
-    private void StartConfigSyncIfNeeded(ProtectionConfigWriter writer)
+    private void StartConfigSyncIfNeeded(ProtectionConfigWriter writer, BandsConfigWriter bandsWriter)
     {
         if (Volatile.Read(ref _configDirty) == 0 || Interlocked.CompareExchange(ref _configSyncRunning, 1, 0) != 0)
         {
@@ -208,15 +212,29 @@ internal sealed class Sampler : IDisposable
         var settings = _settings();
         var enabled = settings.ProtectionEnabled;
         var cap = settings.CeilingDb;
+        var bassCap = settings.BassCapDb;
+        var trebleCap = settings.TrebleCapDb;
         ThreadPool.QueueUserWorkItem(_ =>
         {
             try
             {
-                writer.Sync(enabled, cap);
-            }
-            catch (Exception ex)
-            {
-                Logging.ErrorOnce("config", "Could not write the protection config", ex);
+                try
+                {
+                    writer.Sync(enabled, cap);
+                }
+                catch (Exception ex)
+                {
+                    Logging.ErrorOnce("config", "Could not write the protection config", ex);
+                }
+
+                try
+                {
+                    bandsWriter.Sync(bassCap, trebleCap);
+                }
+                catch (Exception ex)
+                {
+                    Logging.ErrorOnce("bands", "Could not write the bands config", ex);
+                }
             }
             finally
             {

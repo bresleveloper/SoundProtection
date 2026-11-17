@@ -18,11 +18,12 @@ public class ProtectionEngineTests
             (at ?? T.At(0)).UtcDateTime.AddMilliseconds(-ageMs),
             (float)inputDb, (float)reductionDb, (float)reductionDb, -20f);
 
-    private static TelemetrySlot SafetyCap(double reductionDb, double ageMs = 0, DateTimeOffset? at = null) =>
+    private static TelemetrySlot SafetyCap(
+        double reductionDb, double ageMs = 0, DateTimeOffset? at = null, double bassCutDb = 0.0, double trebleCutDb = 0.0) =>
         new(
             SlotKind.SafetyCap, 2, 48000, 2, ApoMode.Default, 0, 1000,
             (at ?? T.At(0)).UtcDateTime.AddMilliseconds(-ageMs),
-            -10f, (float)reductionDb, (float)reductionDb, -20f);
+            -10f, (float)reductionDb, (float)reductionDb, -20f, (float)bassCutDb, (float)trebleCutDb);
 
     private static TelemetrySnapshot Telemetry(DateTimeOffset at, params TelemetrySlot[] slots) =>
         new(new TelemetryHeader(4242, 1, 1, at.UtcDateTime, 5, -20.0f, -8.0f), slots);
@@ -213,6 +214,52 @@ public class ProtectionEngineTests
 
         Assert.Equal(0.0, state.TurnDownDb);
         Assert.Equal(0.0, state.SafetyCapDb);
+    }
+
+    // ---- V2: what the bass and treble caps are cutting right now, from the Safety Cap's slots ----
+
+    [Fact]
+    public void Process_TakesLargestFreshSafetyCapCuts()
+    {
+        var first = SafetyCap(reductionDb: 0.0, trebleCutDb: 3.0);
+        var second = SafetyCap(reductionDb: 0.0, bassCutDb: 1.0, trebleCutDb: 5.0);
+
+        var state = Process(Telemetry(T.At(0), first, second), T.At(0));
+        T.Near(5.0, state.TrebleCutDb);
+        T.Near(1.0, state.BassCutDb);
+
+        var reversed = Process(Telemetry(T.At(0), second, first), T.At(0)); // the largest is taken whichever slot comes first
+        T.Near(5.0, reversed.TrebleCutDb);
+        T.Near(1.0, reversed.BassCutDb);
+    }
+
+    [Fact]
+    public void Process_IgnoresStaleAndNonFiniteCuts()
+    {
+        // A slot that last processed sound over a second ago is stale, whatever it says.
+        var stale = Process(Telemetry(T.At(0), SafetyCap(0.0, ageMs: 1001, bassCutDb: 9.0, trebleCutDb: 9.0)), T.At(0));
+        Assert.Equal(0.0, stale.BassCutDb);
+        Assert.Equal(0.0, stale.TrebleCutDb);
+
+        // Not a number, or infinite, reads as 0, and does not spoil the cut of a good slot beside it.
+        var nonFinite = Process(
+            Telemetry(
+                T.At(0),
+                SafetyCap(0.0, bassCutDb: double.NaN, trebleCutDb: double.PositiveInfinity),
+                SafetyCap(0.0, bassCutDb: 2.0, trebleCutDb: 2.5)),
+            T.At(0));
+        T.Near(2.0, nonFinite.BassCutDb);
+        T.Near(2.5, nonFinite.TrebleCutDb);
+
+        var onlyNonFinite = Process(
+            Telemetry(T.At(0), SafetyCap(0.0, bassCutDb: double.NaN, trebleCutDb: double.PositiveInfinity)), T.At(0));
+        Assert.Equal(0.0, onlyNonFinite.BassCutDb);
+        Assert.Equal(0.0, onlyNonFinite.TrebleCutDb);
+
+        // A cut below 0 is not a cut.
+        var negative = Process(Telemetry(T.At(0), SafetyCap(0.0, bassCutDb: -2.0, trebleCutDb: -2.0)), T.At(0));
+        Assert.Equal(0.0, negative.BassCutDb);
+        Assert.Equal(0.0, negative.TrebleCutDb);
     }
 
     // ---- The turn-down detector ----

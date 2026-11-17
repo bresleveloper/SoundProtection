@@ -4,6 +4,7 @@
 #include <process.h>
 #include <strsafe.h>
 
+#include <cmath>
 #include <cstdarg>
 #include <cstring>
 #include <cwchar>
@@ -54,6 +55,13 @@ float ClampFloat(float v, float lo, float hi) { return v < lo ? lo : (v > hi ? h
 
 bool IsFinite(float v) { return v > -3.4e38f && v < 3.4e38f; }  // false for NaN and Inf
 
+// A cap from bands.bin as the plug-in applies it: clamped to the range of the sliders. NaN, which no clamp handles,
+// reads as 0 dB (the cap at its loosest); +-Inf clamp like any other number out of range.
+float ClampBandCap(float v) {
+    if (std::isnan(v)) return 0.0f;
+    return ClampFloat(v, sp::kMinBandCapDb, sp::kMaxBandCapDb);
+}
+
 bool JoinPath(wchar_t* out, size_t cap, const wchar_t* a, const wchar_t* b) {
     return SUCCEEDED(StringCchPrintfW(out, cap, L"%s\\%s", a, b));
 }
@@ -86,6 +94,24 @@ bool ReadConfigFile(const wchar_t* path, sp::SpConfig& out) {
     if (out.magic != sp::kConfigMagic || out.version != sp::kConfigVersion) return false;
     if (Fnv1a(raw, 28) != out.checksum) return false;
     if (!IsFinite(out.capDb) || !IsFinite(out.marginDb)) return false;
+    return true;
+}
+
+// Reads bands.bin. True only for a complete, well-formed file: 32 bytes, magic, version, checksum. Unlike config.bin, a
+// cap that is not a number does not spoil the file: the contract has the reader clamp it (NaN reads as 0).
+bool ReadBandsFile(const wchar_t* path, sp::SpBands& out) {
+    HANDLE h = CreateFileW(path, GENERIC_READ, kShareAll, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    LARGE_INTEGER size = {};
+    uint8_t raw[sizeof(sp::SpBands)] = {};
+    DWORD got = 0;
+    bool ok = GetFileSizeEx(h, &size) != 0 && size.QuadPart == static_cast<LONGLONG>(sizeof(raw));
+    if (ok) ok = ReadFile(h, raw, sizeof(raw), &got, nullptr) != 0 && got == sizeof(raw);
+    CloseHandle(h);
+    if (!ok) return false;
+    std::memcpy(&out, raw, sizeof(out));
+    if (out.magic != sp::kBandsMagic || out.version != sp::kBandsVersion) return false;
+    if (Fnv1a(raw, 28) != out.checksum) return false;
     return true;
 }
 
@@ -174,7 +200,7 @@ void Runtime::ResolvePathsLocked() {
 
     wchar_t sub[MAX_PATH] = {};
     ok = ok && SUCCEEDED(StringCchCopyW(dataDir_, MAX_PATH, dir)) && JoinPath(configPath_, MAX_PATH, dir, SP_CONFIG_FILE) &&
-         JoinPath(sub, MAX_PATH, dir, SP_TELEMETRY_DIR) && JoinPath(telemetryPath_, MAX_PATH, sub, SP_TELEMETRY_FILE) &&
+         JoinPath(bandsPath_, MAX_PATH, dir, SP_BANDS_FILE) && JoinPath(sub, MAX_PATH, dir, SP_TELEMETRY_DIR) && JoinPath(telemetryPath_, MAX_PATH, sub, SP_TELEMETRY_FILE) &&
          JoinPath(guardPath_, MAX_PATH, sub, SP_GUARD_FILE) && JoinPath(logPath_, MAX_PATH, sub, SP_LOG_FILE) &&
          SUCCEEDED(StringCchPrintfW(logOldPath_, sizeof(logOldPath_) / sizeof(logOldPath_[0]), L"%s.old", logPath_));
     if (ok) {
@@ -184,8 +210,8 @@ void Runtime::ResolvePathsLocked() {
         Log("data folder: %s", utf8);
     } else {
         pathsFailed_ = true;
-        dataDir_[0] = configPath_[0] = telemetryPath_[0] = guardPath_[0] = logPath_[0] = logOldPath_[0] = 0;
-        Log("the data folder path is too long; config, telemetry, guard and log are off");
+        dataDir_[0] = configPath_[0] = bandsPath_[0] = telemetryPath_[0] = guardPath_[0] = logPath_[0] = logOldPath_[0] = 0;
+        Log("the data folder path is too long; config, bands, telemetry, guard and log are off");
     }
 }
 
@@ -198,9 +224,11 @@ void Runtime::EnsureStartedLocked() {
     if (workerRunning_.load(std::memory_order_acquire)) return;
 
     sigHave_ = false;
+    bandsSigHave_ = false;
     tick_ = 0;
     OpenTelemetry();
     CheckConfig();  // the first buffer must already follow the config, not the defaults
+    CheckBands();   // ... and the caps of bands.bin, not both off
 
     stopEvent_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     if (!stopEvent_) {
@@ -264,7 +292,10 @@ void Runtime::WorkerLoop() {
 
 void Runtime::Tick() {
     ++tick_;
-    if (tick_ % kConfigEveryNTicks == 1) CheckConfig();
+    if (tick_ % kConfigEveryNTicks == 1) {
+        CheckConfig();
+        CheckBands();
+    }
     if (!telView_ && tick_ % kTelemetryRetryTicks == 0) OpenTelemetry();  // the folder may appear later
     bool advancing = false;
     WriteTelemetry(advancing);
@@ -333,6 +364,8 @@ SlotRt* Runtime::ClaimSlotLocked(uint32_t kind, uint32_t sampleRate, uint32_t ch
         s.gainReductionDb.store(0.0f, std::memory_order_relaxed);
         s.maxGainReductionDb.store(0.0f, std::memory_order_relaxed);
         s.outputPeakLin.store(0.0f, std::memory_order_relaxed);
+        s.bassCutDb.store(0.0f, std::memory_order_relaxed);
+        s.trebleCutDb.store(0.0f, std::memory_order_relaxed);
         s.inUse = true;
         return &s;
     }
@@ -351,6 +384,9 @@ void Runtime::PublishSettingsLocked() {
     setMargin_.store(cfgMargin_, std::memory_order_relaxed);
     setFlags_.store((cfgEnabled_ ? kSettingsEnabled : 0u) | (safe_.load(std::memory_order_relaxed) ? kSettingsSafe : 0u),
                     std::memory_order_relaxed);
+    setBandFlags_.store(bandFlags_, std::memory_order_relaxed);
+    setBass_.store(bandBass_, std::memory_order_relaxed);
+    setTreble_.store(bandTreble_, std::memory_order_relaxed);
     setSeq_.store(v + 2, std::memory_order_release);  // even: stable
 }
 
@@ -361,11 +397,17 @@ bool Runtime::ReadSettings(Settings& out) const {
         const float cap = setCap_.load(std::memory_order_relaxed);
         const float margin = setMargin_.load(std::memory_order_relaxed);
         const uint32_t flags = setFlags_.load(std::memory_order_relaxed);
+        const uint32_t bandFlags = setBandFlags_.load(std::memory_order_relaxed);
+        const float bass = setBass_.load(std::memory_order_relaxed);
+        const float treble = setTreble_.load(std::memory_order_relaxed);
         std::atomic_thread_fence(std::memory_order_acquire);
         if (setSeq_.load(std::memory_order_relaxed) == s1) {
             out.capDb = cap;
             out.marginDb = margin;
             out.flags = flags;
+            out.bandFlags = bandFlags;
+            out.bassCapDb = bass;
+            out.trebleCapDb = treble;
             out.seq = s1;
             return true;
         }
@@ -449,6 +491,74 @@ void Runtime::CheckConfig() {
         Log("config applied: sequence %u, %s, cap %.1f dB, margin %.1f dB", sequence, enabled ? "on" : "off", cap, margin);
     }
     if (logInvalid) Log("config.bin is missing or invalid; keeping the last good values");
+}
+
+// =====================================================================================================
+// Bands (V2 bass and treble caps)
+// =====================================================================================================
+
+// CheckConfig's plan for bands.bin, with its own change signature and its own values in use: the file is read when it
+// changed and, for a second after it was written, at every check (two writes inside one timestamp tick look the same).
+// A missing or bad file keeps the last good caps (before any good file: both off) and is logged once per bad episode.
+void Runtime::CheckBands() {
+    if (!pathsReady_) return;
+
+    FILETIME nowFt = {};
+    GetSystemTimeAsFileTime(&nowFt);
+    const int64_t now = ToInt64(nowFt);
+
+    bool ok = false;
+    sp::SpBands b = {};
+    WIN32_FILE_ATTRIBUTE_DATA fad = {};
+    if (GetFileAttributesExW(bandsPath_, GetFileExInfoStandard, &fad)) {
+        const int64_t write = ToInt64(fad.ftLastWriteTime);
+        const uint64_t size = (static_cast<uint64_t>(fad.nFileSizeHigh) << 32) | fad.nFileSizeLow;
+        const bool changed = !bandsSigHave_ || write != bandsSigWrite_ || size != bandsSigSize_;
+        const bool recent = (now - write) < kRecentWrite100ns;
+        if (!changed && !recent) return;
+        bandsSigHave_ = true;
+        bandsSigWrite_ = write;
+        bandsSigSize_ = size;
+        ok = ReadBandsFile(bandsPath_, b);
+        if (!ok) bandsSigHave_ = false;  // torn, locked or wrong: look again at the next check, however old the file is
+    } else {
+        bandsSigHave_ = false;  // missing: keep the last good values
+    }
+
+    bool logApplied = false;
+    bool logInvalid = false;
+    uint32_t flags = 0;
+    float bass = 0.0f;
+    float treble = 0.0f;
+    uint32_t sequence = 0;
+
+    AcquireSRWLockExclusive(&state_);
+    if (ok) {
+        flags = b.flags & (sp::kBandBass | sp::kBandTreble);  // other bits are ignored
+        bass = ClampBandCap(b.bassCapDb);
+        treble = ClampBandCap(b.trebleCapDb);
+        sequence = b.sequence;
+        const bool differs = bandSequence_ != sequence || bandFlags_ != flags || bandBass_ != bass || bandTreble_ != treble;
+        bandsInvalidLogged_ = false;
+        if (differs) {
+            bandSequence_ = sequence;
+            bandFlags_ = flags;
+            bandBass_ = bass;
+            bandTreble_ = treble;
+            PublishSettingsLocked();
+            logApplied = true;
+        }
+    } else if (!bandsInvalidLogged_) {
+        bandsInvalidLogged_ = true;
+        logInvalid = true;
+    }
+    ReleaseSRWLockExclusive(&state_);
+
+    if (logApplied) {
+        Log("bands applied: sequence %u, bass %s %.1f dB, treble %s %.1f dB", sequence, (flags & sp::kBandBass) ? "on" : "off", bass,
+            (flags & sp::kBandTreble) ? "on" : "off", treble);
+    }
+    if (logInvalid) Log("bands.bin is missing or invalid; keeping the last good values");
 }
 
 // =====================================================================================================
@@ -540,6 +650,8 @@ void Runtime::WriteTelemetry(bool& advancing) {
         t.gainReductionDb = s.gainReductionDb.load(std::memory_order_relaxed);
         t.maxGainReductionDb = s.maxGainReductionDb.exchange(0.0f, std::memory_order_relaxed);
         t.outputPeakDb = sp::LinearToDb(s.outputPeakLin.exchange(0.0f, std::memory_order_relaxed));
+        t.bassCutDb = s.bassCutDb.load(std::memory_order_relaxed);      // 0 for a leveler: it never writes them
+        t.trebleCutDb = s.trebleCutDb.load(std::memory_order_relaxed);
     }
     ReleaseSRWLockExclusive(&state_);
 

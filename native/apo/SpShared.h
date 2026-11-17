@@ -1,6 +1,8 @@
 // SpShared.h - the contract shared by the plug-in (C++), the installer (PowerShell) and the tray app (C#).
 // Owned by the controller. Agents read it; they never edit it. Any change here must be mirrored in
-// src/SoundProtection.Core (ProtectionConfig.cs, ApoTelemetry.cs) and installer/SoundProtection.Install.ps1.
+// src/SoundProtection.Core (ProtectionConfig.cs, BandsConfig.cs, ApoTelemetry.cs) and installer/SoundProtection.Install.ps1.
+// V2 (2026-11-17) adds bands.bin (the bass and treble caps) and the two cut floats in each telemetry slot; the installer
+// neither writes bands.bin nor reads those floats, so it needs no change for V2.
 #pragma once
 
 #include <cstdint>
@@ -31,6 +33,7 @@ static const GUID kClsidSafetyCap = { 0x148d0a3c, 0x621b, 0x40f5, { 0xb7, 0xfd, 
 #define SP_TELEMETRY_FILE  L"apo.bin"             // <data>\telemetry\apo.bin     (memory-mapped, tray reads)
 #define SP_GUARD_FILE      L"guard.bin"           // <data>\telemetry\guard.bin   (crash-loop guard)
 #define SP_LOG_FILE        L"apo.log"             // <data>\telemetry\apo.log     (UTF-8, capped at 256 KB, then .old)
+#define SP_BANDS_FILE      L"bands.bin"           // <data>\bands.bin             (tray writes, plug-in reads; V2 bass and treble caps)
 
 // ---- Defaults and limits ----------------------------------------------------------------------
 constexpr float kDefaultCapDb    = -20.0f;  // loudness cap before the volume slider (LUFS-like dB)
@@ -38,6 +41,12 @@ constexpr float kDefaultMarginDb = 12.0f;   // safety cap ceiling = min(cap + ma
 constexpr float kMinCapDb = -60.0f, kMaxCapDb = 0.0f;
 constexpr float kMinMarginDb = 0.0f, kMaxMarginDb = 30.0f;
 constexpr float kCeilingMaxDb = -1.0f;
+
+// V2 bass and treble caps (bands.bin). A cap is a level in dB relative to a full-scale sine (a -20 dBFS sine at the
+// band centre reads -20); 0 dB is the slider's "Off" end. Over its cap a band is cut by the excess, at most 12 dB.
+constexpr float kMinBandCapDb = -60.0f, kMaxBandCapDb = 0.0f;
+constexpr uint32_t kBandBass   = 0x1;  // bands.bin flags: the bass cap is on
+constexpr uint32_t kBandTreble = 0x2;  // bands.bin flags: the treble cap is on
 
 #pragma pack(push, 1)
 
@@ -60,6 +69,27 @@ struct SpConfig {
     uint32_t checksum;  // 28
 };
 static_assert(sizeof(SpConfig) == 32, "SpConfig must be 32 bytes");
+
+// ---- Bands (V2 bass and treble caps): 32 bytes, little-endian ------------------------------------
+// checksum = FNV-1a 32-bit over bytes 0..27, as for SpConfig. The tray sets a band's flag when its slider is below 0 dB.
+// A missing or invalid file keeps the last good values (before any good file: both caps off).
+// Golden B1 (seq 1, bass on -30, treble on -35):
+//   53 50 42 44 01 00 00 00 01 00 00 00 03 00 00 00 00 00 F0 C1 00 00 0C C2 00 00 00 00 3A 06 98 16
+// Golden B2 (seq 42, treble only -27.5, bass 0):
+//   53 50 42 44 01 00 00 00 2A 00 00 00 02 00 00 00 00 00 00 00 00 00 DC C1 00 00 00 00 4A 2C 0A 69
+constexpr uint32_t kBandsMagic   = 0x44425053;  // "SPBD"
+constexpr uint32_t kBandsVersion = 1;
+struct SpBands {
+    uint32_t magic;        // 0
+    uint32_t version;      // 4
+    uint32_t sequence;     // 8   incremented by the tray on every write
+    uint32_t flags;        // 12  kBandBass | kBandTreble; other bits 0 (ignored when read)
+    float    bassCapDb;    // 16  clamp to [kMinBandCapDb, kMaxBandCapDb] when read; NaN reads as 0
+    float    trebleCapDb;  // 20  the same
+    uint32_t reserved;     // 24  0
+    uint32_t checksum;     // 28
+};
+static_assert(sizeof(SpBands) == 32, "SpBands must be 32 bytes");
 
 // ---- Telemetry: header (64 bytes) + kTelemetrySlots slots (64 bytes each) = 2112 bytes -------------
 constexpr uint32_t kTelemetryMagic   = 0x4D545053;  // "SPTM"
@@ -102,11 +132,12 @@ struct SpTelemetrySlot {
     uint32_t clipperHits;          // 20  safety cap: cumulative final-clamp hits; leveler: 0
     uint64_t framesProcessed;      // 24  cumulative
     int64_t  lastProcessFileTime;  // 32  UTC FILETIME stamped by the worker when framesProcessed changed
-    float    inputDb;              // 40  leveler: momentary loudness of its input; safety cap: input true peak over the last tick
+    float    inputDb;              // 40  leveler: momentary loudness of its input; safety cap: true peak into its limiter (after the band cuts) over the last tick
     float    gainReductionDb;      // 44  current, >= 0
     float    maxGainReductionDb;   // 48  largest during the last tick
     float    outputPeakDb;         // 52  output sample peak during the last tick
-    uint8_t  reserved[8];          // 56..63
+    float    bassCutDb;            // 56  safety cap: the bass cap's current cut, >= 0 (V2); leveler: 0
+    float    trebleCutDb;          // 60  safety cap: the treble cap's current cut, >= 0 (V2); leveler: 0
 };
 static_assert(sizeof(SpTelemetrySlot) == 64, "SpTelemetrySlot must be 64 bytes");
 

@@ -13,6 +13,9 @@ internal static class ProtectionPaths
     /// <summary>The 32-byte config that the tray writes and the plug-in reads.</summary>
     public static string ConfigPath => Path.Combine(DataDir, "config.bin");
 
+    /// <summary>The 32-byte bass and treble caps that the tray writes and the plug-in reads, beside the config.</summary>
+    public static string BandsPath => Path.Combine(DataDir, "bands.bin");
+
     /// <summary>The memory-mapped telemetry file that the plug-in writes and the tray reads.</summary>
     public static string TelemetryPath => Path.Combine(DataDir, "telemetry", "apo.bin");
 

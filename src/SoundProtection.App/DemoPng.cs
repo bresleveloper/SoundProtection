@@ -47,10 +47,12 @@ internal static class DemoPng
     }
 
     // The plug-in is in place: the number is the loudest sound before the volume slider, and Zoom is being turned down to the cap.
+    // The bass cap is off, and the treble cap is at -32 dB and is turning the high part of the sound down by 4 dB.
     private static void ShowProtection(PanelForm form)
     {
         const double cap = -20.0;
         form.SetCeiling(cap);
+        form.SetBands(bassCapDb: 0.0, trebleCapDb: -32.0);
 
         var now = DateTimeOffset.UtcNow;
         form.AddEvent(new TurnDownEvent(now.AddSeconds(-90), TimeSpan.FromSeconds(0.4), 3.2, cap, "Chrome"));
@@ -67,17 +69,21 @@ internal static class DemoPng
                 {
                     new AppTurnDown("Zoom", 6.2),
                     new AppTurnDown("Chrome", 0.0),
-                }),
+                },
+                BassCutDb: 0.0,
+                TrebleCutDb: 4.0),
             new[] { "Apps can take exclusive control of Headphones (Realtek(R) Audio)" });
 
         form.ShowState(EarState(now, cap, earDb: -43.7, holdDb: -40.1, over: false, overByDb: 0), protection);
     }
 
     // The plug-in is not installed: the level at the ear and the alerts of the older display, under a red status line.
+    // The sliders show the same bass and treble caps as above, but there is no plug-in to say what they are cutting.
     private static void ShowEarLevel(PanelForm form)
     {
         const double ceiling = -28.0;
         form.SetCeiling(ceiling);
+        form.SetBands(bassCapDb: 0.0, trebleCapDb: -32.0);
 
         var now = DateTimeOffset.UtcNow;
         form.AddEvent(new OverEvent(now.AddSeconds(-90), TimeSpan.FromSeconds(0.4), 3.2, ceiling, "Chrome"));

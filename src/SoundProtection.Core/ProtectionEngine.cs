@@ -13,6 +13,8 @@ public sealed record AppTurnDown(string Name, double TurnDownDb);
 /// tick in the last 3 s (see <see cref="HealthResult.PluginSeenRunning"/>); a state built without it counts the plug-in as not
 /// seen running. <c>PluginEnabled</c> is true when, at the last of those ticks, the plug-in said it was switched on (see
 /// <see cref="HealthResult.PluginEnabled"/>); a state built without it counts the plug-in as not enabled.
+/// <c>BassCutDb</c> and <c>TrebleCutDb</c> are the most the Safety Cap is turning the bass band and the treble band down right
+/// now, never below 0; a state built without them has no cut.
 /// </summary>
 public sealed record ProtectionState(
     ProtectionStatus Status,
@@ -23,7 +25,9 @@ public sealed record ProtectionState(
     IReadOnlyList<AppTurnDown> Apps,
     bool WatchedOutputCovered = true,
     bool PluginSeenRunning = false,
-    bool PluginEnabled = false)
+    bool PluginEnabled = false,
+    double BassCutDb = 0.0,
+    double TrebleCutDb = 0.0)
 {
     /// <summary>
     /// True when the plug-in is installed and set up, so the panel shows loudness before the slider. False means the ear-level
@@ -152,6 +156,8 @@ public sealed class ProtectionEngine
         var loudest = double.NegativeInfinity;
         var turnDown = 0.0;
         var safetyCap = 0.0;
+        var bassCut = 0.0;
+        var trebleCut = 0.0;
 
         if (tel is not null)
         {
@@ -176,6 +182,8 @@ public sealed class ProtectionEngine
                 else if (slot.Kind == SlotKind.SafetyCap)
                 {
                     safetyCap = Math.Max(safetyCap, reduction);
+                    bassCut = Math.Max(bassCut, BandCut(slot.BassCutDb));
+                    trebleCut = Math.Max(trebleCut, BandCut(slot.TrebleCutDb));
                 }
             }
         }
@@ -198,8 +206,13 @@ public sealed class ProtectionEngine
             matched,
             health.WatchedOutputCovered,
             health.PluginSeenRunning,
-            health.PluginEnabled);
+            health.PluginEnabled,
+            bassCut,
+            trebleCut);
     }
+
+    // A band's cut is how far it is turned down: not below 0, and 0 for a reading that is not a number or is infinite.
+    private static double BandCut(double cutDb) => double.IsFinite(cutDb) ? Math.Max(0.0, cutDb) : 0.0;
 
     // A slot counts while it has processed sound within the last second, before or after now.
     private static bool IsFresh(TelemetrySlot slot, DateTime nowUtc)

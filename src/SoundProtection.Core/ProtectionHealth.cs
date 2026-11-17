@@ -100,7 +100,7 @@ public static class ProtectionHealth
     /// sound is playing.
     /// </param>
     /// <param name="mismatch">A difference between the settings and the plug-in that is to be reported (see <see cref="HealthTracker"/>).</param>
-    /// <param name="settingsNotSaved">The latest attempt to write config.bin failed.</param>
+    /// <param name="settingsNotSaved">The latest attempt to write config.bin or bands.bin failed.</param>
     public static HealthResult Evaluate(
         RegistryFacts reg,
         TelemetrySnapshot? tel,

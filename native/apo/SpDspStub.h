@@ -11,6 +11,7 @@
 //     so that the plug-in's handling of a look-ahead tail (what the DSP still holds when the sound stops, and what
 //     Reset throws away) can be checked without the real DSP: after Prepare or Reset the first LatencyFrames()
 //     output frames are zeros, and every sample comes out LatencyFrames() frames after it went in.
+//   - BandGuard copies the audio unchanged (in == out allowed), reports cuts of 0 and no latency. It applies no caps.
 //   - Meters report the floor. Nothing here measures loudness.
 //   - Every guarantee about the output (finite samples, Leveler within +-1.0, Safety Cap within the ceiling)
 //     comes from the plug-in's own final sanitise-and-clamp, never from this stub.
@@ -131,6 +132,31 @@ private:
     uint32_t latencyFrames_ = 0;
     uint32_t pos_ = 0;
     std::vector<float> line_;  // latencyFrames_ frames, interleaved: the audio that is still on its way out
+};
+
+struct BandGuardParams {
+    bool  enabled     = true;
+    bool  bassOn      = false;
+    float bassCapDb   = 0.0f;
+    bool  trebleOn    = false;
+    float trebleCapDb = 0.0f;
+};
+
+class BandGuard {
+public:
+    void Prepare(uint32_t /*sampleRate*/, uint32_t channels) noexcept { channels_ = channels; }
+    void Reset() noexcept {}
+    void SetParams(const BandGuardParams& /*p*/) noexcept {}
+    void Process(const float* in, float* out, uint32_t frames) noexcept {
+        if (in == nullptr || out == nullptr || frames == 0) return;
+        if (in != out) std::memmove(out, in, sizeof(float) * static_cast<size_t>(frames) * channels_);
+    }
+    float BassCutDb() const noexcept { return 0.0f; }
+    float TrebleCutDb() const noexcept { return 0.0f; }
+    uint32_t LatencyFrames() const noexcept { return 0; }
+
+private:
+    uint32_t channels_ = 0;
 };
 
 }  // namespace sp

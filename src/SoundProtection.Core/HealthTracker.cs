@@ -23,7 +23,7 @@ public sealed class HealthTracker
 
     /// <param name="soundPlaying">Something is playing on the watched output right now.</param>
     /// <param name="watched">The output being watched, or null when not known.</param>
-    /// <param name="settingsNotSaved">The latest attempt to write config.bin failed (<see cref="ProtectionConfigWriter.LastAttemptFailed"/>).</param>
+    /// <param name="settingsNotSaved">The latest attempt to write config.bin or bands.bin failed (<see cref="ProtectionConfigWriter.LastAttemptFailed"/> or <see cref="BandsConfigWriter.LastAttemptFailed"/>).</param>
     public HealthResult Evaluate(
         RegistryFacts reg,
         TelemetrySnapshot? tel,

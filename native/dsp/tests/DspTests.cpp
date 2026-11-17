@@ -1,11 +1,12 @@
 // DspTests.cpp - native tests for native\dsp\SpDsp.h (the Sound Protection DSP library).
 //
-// Self-contained runner, no framework. For each of the 27 tests it prints "PASS name" or "FAIL name: message",
-// then "ALL 27 PASSED" (exit code 0) or "FAILED: n of 27 tests" (exit code 1).
+// Self-contained runner, no framework. For each of the 40 tests it prints "PASS name" or "FAIL name: message",
+// then "ALL 40 PASSED" (exit code 0) or "FAILED: n of 40 tests" (exit code 1).
 //
 // Real-time guard: this file replaces the global operator new/delete with counting versions. Every call into the
 // library's real-time surface (Process, Add, SetParams) runs inside a NoAlloc scope, and a heap allocation or
-// free inside such a scope fails the running test. Prepare() is the only call allowed to allocate. The same
+// free inside such a scope fails the running test. Prepare() is the only call allowed to allocate, except
+// BandGuard's (tests 28 to 40), which uses fixed arrays and runs inside a NoAlloc scope as well. The same
 // operator new can also be told to fail one allocation (g_failAllocIn): the only way to see what Prepare does when
 // it runs out of memory (test 24, part E).
 //
@@ -21,6 +22,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 #include <limits>
 #include <new>
 #include <vector>
@@ -1787,6 +1789,615 @@ static void T27_channel_weights_from_mask() {
 }
 
 // ================================================================================================
+// Tests 28-40: BandGuard, the bass and treble caps (V2)
+// ================================================================================================
+
+// A speech-like programme, the same on every channel: harmonics 1 to 20 of 220 Hz at amplitude 1/n, scaled so that
+// their sum peaks at 0.3, times a 4 Hz envelope (a syllable every 250 ms, silent in between), plus a 3500 Hz
+// component of 0.05 in the second half.
+static std::vector<float> SpeechLike(double fs, uint32_t ch, double seconds) {
+    const size_t frames = Frames(seconds, fs);
+    std::vector<double> voice(frames);
+    double peak = 0.0;
+    for (size_t i = 0; i < frames; ++i) {
+        const double t = static_cast<double>(i) / fs;
+        double sum = 0.0;
+        for (int n = 1; n <= 20; ++n) sum += std::sin(kTwoPi * 220.0 * n * t) / n;
+        voice[i] = sum;
+        peak = std::max(peak, std::fabs(sum));
+    }
+    std::vector<float> v(frames * ch);
+    for (size_t i = 0; i < frames; ++i) {
+        const double t = static_cast<double>(i) / fs;
+        const double envelope = 0.5 - 0.5 * std::cos(kTwoPi * 4.0 * t);
+        double x = 0.3 * voice[i] / peak * envelope;
+        if (i >= frames / 2) x += 0.05 * std::sin(kTwoPi * 3500.0 * t);
+        for (uint32_t c = 0; c < ch; ++c) v[i * ch + c] = static_cast<float>(x);
+    }
+    return v;
+}
+
+static sp::BandGuardParams BgParams(bool bassOn, float bassCapDb, bool trebleOn, float trebleCapDb, bool enabled = true) {
+    sp::BandGuardParams p;
+    p.enabled = enabled;
+    p.bassOn = bassOn;
+    p.bassCapDb = bassCapDb;
+    p.trebleOn = trebleOn;
+    p.trebleCapDb = trebleCapDb;
+    return p;
+}
+
+static void BgSet(sp::BandGuard& bg, const sp::BandGuardParams& p) {
+    NoAlloc guard;
+    bg.SetParams(p);
+}
+// BandGuard::Prepare keeps the real-time rules too (fixed arrays, nothing to allocate), so it runs in a NoAlloc scope.
+static void BgPrepare(sp::BandGuard& bg, uint32_t fs, uint32_t ch) {
+    NoAlloc guard;
+    bg.Prepare(fs, ch);
+}
+
+// The largest cut (dB) read after any call of a run, per band: it tells a test that the guard really did cut.
+struct CutPeaks {
+    float bass = 0.0f;
+    float treble = 0.0f;
+};
+
+// Appends the processed signal to out. peaks (optional) collects the largest cuts read after a call.
+static void BgRun(sp::BandGuard& bg, const std::vector<float>& in, uint32_t ch, std::vector<float>& out,
+                  size_t chunk = 480, CutPeaks* peaks = nullptr) {
+    const size_t frames = in.size() / ch;
+    const size_t base = out.size();
+    out.resize(base + in.size());
+    for (size_t pos = 0; pos < frames; pos += chunk) {
+        const size_t n = std::min(chunk, frames - pos);
+        {
+            NoAlloc guard;
+            bg.Process(in.data() + pos * ch, out.data() + base + pos * ch, static_cast<uint32_t>(n));
+        }
+        if (peaks != nullptr) {
+            peaks->bass = std::max(peaks->bass, bg.BassCutDb());
+            peaks->treble = std::max(peaks->treble, bg.TrebleCutDb());
+        }
+    }
+}
+static void BgRunInPlace(sp::BandGuard& bg, std::vector<float>& buf, uint32_t ch, size_t chunk = 480) {
+    const size_t frames = buf.size() / ch;
+    for (size_t pos = 0; pos < frames; pos += chunk) {
+        const size_t n = std::min(chunk, frames - pos);
+        NoAlloc guard;
+        bg.Process(buf.data() + pos * ch, buf.data() + pos * ch, static_cast<uint32_t>(n));
+    }
+}
+// One frame per call. Appends the processed signal to out, and the two cuts read after every frame to bassCut and
+// trebleCut (one entry per frame).
+static void BgRunPerFrame(sp::BandGuard& bg, const std::vector<float>& in, uint32_t ch, std::vector<float>& out,
+                          std::vector<float>& bassCut, std::vector<float>& trebleCut) {
+    const size_t frames = in.size() / ch;
+    const size_t base = out.size();
+    out.resize(base + in.size());
+    bassCut.reserve(bassCut.size() + frames);
+    trebleCut.reserve(trebleCut.size() + frames);
+    for (size_t n = 0; n < frames; ++n) {
+        {
+            NoAlloc guard;
+            bg.Process(in.data() + n * ch, out.data() + base + n * ch, 1);
+        }
+        bassCut.push_back(bg.BassCutDb());
+        trebleCut.push_back(bg.TrebleCutDb());
+    }
+}
+
+// Level: 20*log10 of the largest |sample| of channel c over the frames [fromFrame, toFrame), in dB re 1.0 (-300 for silence).
+static double LevelDb(const std::vector<float>& v, uint32_t ch, uint32_t c, size_t fromFrame, size_t toFrame) {
+    double peak = 0.0;
+    for (size_t n = fromFrame; n < toFrame; ++n) peak = std::max(peak, static_cast<double>(std::fabs(v[n * ch + c])));
+    return peak > 0.0 ? 20.0 * std::log10(peak) : -300.0;
+}
+// "Settled": the level over the last 200 ms of a one second run.
+static double SettledDb(const std::vector<float>& v, uint32_t ch, uint32_t c, double fs) {
+    const size_t total = v.size() / ch;
+    return LevelDb(v, ch, c, total - Frames(0.200, fs), total);
+}
+
+// The largest step between consecutive readings cut[from] ... cut[to - 1]; the first one is measured from `before`.
+static double MaxStep(const std::vector<float>& cut, size_t from, size_t to, double before) {
+    double worst = 0.0, previous = before;
+    for (size_t i = from; i < to && i < cut.size(); ++i) {
+        worst = std::max(worst, std::fabs(static_cast<double>(cut[i]) - previous));
+        previous = static_cast<double>(cut[i]);
+    }
+    return worst;
+}
+// Index of the first reading that is exactly 0, or cut.size() when there is none.
+static size_t FirstZero(const std::vector<float>& cut) {
+    size_t i = 0;
+    while (i < cut.size() && cut[i] != 0.0f) ++i;
+    return i;
+}
+// True when a and b hold the same bits from sample index `from` to the end.
+static bool SameBitsFrom(const std::vector<float>& a, const std::vector<float>& b, size_t from) {
+    return a.size() == b.size() && from <= a.size() &&
+           std::memcmp(a.data() + from, b.data() + from, (a.size() - from) * sizeof(float)) == 0;
+}
+// Index of the first sample of `out` that is not what sanitising `in` makes of it (NaN and Inf as exactly 0, every
+// other sample unchanged to the bit), or in.size() when every sample is.
+static size_t FirstNotSanitised(const std::vector<float>& in, const std::vector<float>& out) {
+    if (in.size() != out.size()) return 0;
+    for (size_t i = 0; i < in.size(); ++i) {
+        const float want = std::isfinite(in[i]) ? in[i] : 0.0f;
+        if (std::memcmp(&want, &out[i], sizeof want) != 0) return i;
+    }
+    return in.size();
+}
+
+// The tone of test 29: 3500 Hz at amplitude 0.1 (-20 dB) on every channel, 1 s, through bg (which the caller has set to
+// treble on at -26 dB, so 6 dB over the cap). Every channel must settle at -26.0 +- 0.5 dB.
+static void ExpectTrebleToneCapped(sp::BandGuard& bg, uint32_t fs, uint32_t ch, const char* what) {
+    std::vector<float> out;
+    BgRun(bg, Sine(static_cast<double>(fs), ch, 3500.0, 0.1, fs), ch, out);
+    for (uint32_t c = 0; c < ch; ++c) {
+        const double level = SettledDb(out, ch, c, static_cast<double>(fs));
+        CHECK(Near(level, -26.0, 0.5), "%s: channel %u settles at %.3f dB, want -26.0 +- 0.5", what, c, level);
+    }
+}
+
+// T35 and its Part C. One band has settled at a cut of about 6 dB (a tone of amplitude 0.1 at the band's centre, cap -26 dB)
+// and is switched off in mid-tone, by its own flag or by the global `enabled`. The cut must fall without a step and be
+// exactly 0 within limitSeconds, and from that frame on the output must be a bit-exact copy of the tone, still running.
+static void ExpectSwitchOffReleases(bool bass, bool viaEnabled, double freq, double limitSeconds, const char* what) {
+    sp::BandGuard bg;
+    BgPrepare(bg, 48000, 2);
+    const sp::BandGuardParams on = BgParams(bass, -26.0f, !bass, -26.0f);   // only the band under test is on
+    BgSet(bg, on);
+    std::vector<float> before;
+    BgRun(bg, Sine(48000.0, 2, freq, 0.1, 48000), 2, before);               // 1 s: the cut settles
+    const float settled = bass ? bg.BassCutDb() : bg.TrebleCutDb();
+    CHECK(Near(settled, 6.0, 0.3), "%s: the cut settles at %.3f dB, want about 6", what, settled);
+
+    sp::BandGuardParams off = on;
+    if (viaEnabled) off.enabled = false;
+    else if (bass) off.bassOn = false;
+    else off.trebleOn = false;
+    BgSet(bg, off);
+    const std::vector<float> tone = Sine(48000.0, 2, freq, 0.1, Frames(limitSeconds + 0.5, 48000.0), 0.0, 48000);
+    std::vector<float> after, bassCut, trebleCut;
+    BgRunPerFrame(bg, tone, 2, after, bassCut, trebleCut);
+    const std::vector<float>& cut = bass ? bassCut : trebleCut;
+
+    const size_t oneMs = Frames(0.001, 48000.0);
+    CHECK(cut[oneMs - 1] >= 5.9f, "%s: 1 ms after switching off the cut is %.3f dB, want >= 5.9", what, cut[oneMs - 1]);
+    const double step = MaxStep(cut, 0, cut.size(), static_cast<double>(settled));
+    CHECK(step <= 0.1, "%s: the cut moves by %.4f dB in one frame, want <= 0.1", what, step);
+    const size_t zero = FirstZero(cut);
+    CHECK(zero < Frames(limitSeconds, 48000.0), "%s: the cut is first exactly 0 at frame %zu, want within %.1f s (%zu frames)",
+          what, zero, limitSeconds, Frames(limitSeconds, 48000.0));
+    bool stays = true;
+    for (size_t i = zero; i < cut.size(); ++i) stays = stays && cut[i] == 0.0f;
+    CHECK(stays, "%s: the cut left 0 again after it had reached 0", what);
+    CHECK(SameBitsFrom(tone, after, zero * 2), "%s: from frame %zu on the output is not a bit-exact copy of the input "
+          "(differs by up to %.3g)", what, zero, MaxAbsDiff(tone, after));
+}
+
+static void T28_bandguard_idle_is_bit_exact() {
+    const std::vector<float> in = SpeechLike(48000.0, 2, 2.0);
+    CHECK(PeakAbs(in) > 0.25 && PeakAbs(in) < 0.36, "the speech-like signal peaks at %.4f, want about 0.3", PeakAbs(in));
+
+    // Part A: both bands off.
+    sp::BandGuard off;
+    BgPrepare(off, 48000, 2);
+    std::vector<float> outA;
+    BgRun(off, in, 2, outA);
+    CHECK(SameBits(in, outA), "both bands off: the output is not a bit-exact copy of the input (differs by up to %.3g)",
+          MaxAbsDiff(in, outA));
+
+    // Part B: both bands on at -3 dB. Neither band of this signal gets near -3 dB, so nothing is cut: not by a bit.
+    sp::BandGuard under;
+    BgPrepare(under, 48000, 2);
+    BgSet(under, BgParams(true, -3.0f, true, -3.0f));
+    std::vector<float> outB;
+    CutPeaks peaks;
+    BgRun(under, in, 2, outB, 480, &peaks);
+    CHECK(SameBits(in, outB), "both bands on at -3 dB: the output is not a bit-exact copy of the input (differs by up to %.3g)",
+          MaxAbsDiff(in, outB));
+    CHECK(peaks.bass == 0.0f && peaks.treble == 0.0f, "both bands on at -3 dB: a cut moved (bass %.4f dB, treble %.4f dB)",
+          peaks.bass, peaks.treble);
+
+    // Part C: Part B in place.
+    sp::BandGuard inPlace;
+    BgPrepare(inPlace, 48000, 2);
+    BgSet(inPlace, BgParams(true, -3.0f, true, -3.0f));
+    std::vector<float> buf = in;
+    BgRunInPlace(inPlace, buf, 2);
+    CHECK(SameBits(in, buf), "both bands on at -3 dB, in place: the buffer is not a bit-exact copy of the input (differs by up to %.3g)",
+          MaxAbsDiff(in, buf));
+}
+
+static void T29_bandguard_treble_centre_tone_capped() {
+    sp::BandGuard bg;
+    BgPrepare(bg, 48000, 2);
+    BgSet(bg, BgParams(false, 0.0f, true, -26.0f));
+
+    // 1 s of 3500 Hz at 0.1 (-20 dB), 6 dB over the cap. The first 50 ms go in one frame per call, to read the cut as it
+    // moves; the rest in the usual 480-frame calls.
+    const size_t headFrames = Frames(0.050, 48000.0);
+    std::vector<float> out, bassCut, trebleCut;
+    BgRunPerFrame(bg, Sine(48000.0, 2, 3500.0, 0.1, headFrames), 2, out, bassCut, trebleCut);
+    BgRun(bg, Sine(48000.0, 2, 3500.0, 0.1, 48000 - headFrames, 0.0, headFrames), 2, out);
+
+    for (uint32_t c = 0; c < 2; ++c) {
+        const double settled = SettledDb(out, 2, c, 48000.0);
+        CHECK(Near(settled, -26.0, 0.5), "channel %u settles at %.3f dB, want -26.0 +- 0.5", c, settled);
+    }
+    const double early = LevelDb(out, 2, 0, Frames(0.045, 48000.0), headFrames);
+    CHECK(early <= -25.0, "45 to 50 ms after the onset the level is %.3f dB, want <= -25.0", early);
+    const double step = MaxStep(trebleCut, 0, headFrames, 0.0);
+    CHECK(step <= 0.1, "during the onset the treble cut moves by up to %.4f dB in one frame, want <= 0.1", step);
+    CHECK(trebleCut[headFrames - 1] > 4.0f, "50 ms in, the treble cut is only %.3f dB: the step check proves nothing",
+          trebleCut[headFrames - 1]);
+    CHECK(bg.BassCutDb() == 0.0f, "the bass is off but its cut reads %.4f dB, want exactly 0", bg.BassCutDb());
+}
+
+static void T30_bandguard_bass_centre_tone_capped() {
+    sp::BandGuard bg;
+    BgPrepare(bg, 48000, 2);
+    BgSet(bg, BgParams(true, -26.0f, false, 0.0f));
+
+    std::vector<float> out;
+    BgRun(bg, Sine(48000.0, 2, 160.0, 0.1, 48000), 2, out);
+
+    for (uint32_t c = 0; c < 2; ++c) {
+        const double settled = SettledDb(out, 2, c, 48000.0);
+        CHECK(Near(settled, -26.0, 0.5), "channel %u settles at %.3f dB, want -26.0 +- 0.5", c, settled);
+    }
+    const double early = LevelDb(out, 2, 0, Frames(0.140, 48000.0), Frames(0.150, 48000.0));
+    CHECK(early <= -25.0, "140 to 150 ms after the onset the level is %.3f dB, want <= -25.0", early);
+    CHECK(bg.BassCutDb() > 4.0f, "the bass cut is only %.3f dB: the level checks prove nothing", bg.BassCutDb());
+    CHECK(bg.TrebleCutDb() == 0.0f, "the treble is off but its cut reads %.4f dB, want exactly 0", bg.TrebleCutDb());
+}
+
+static void T31_bandguard_tone_between_bands_untouched() {
+    sp::BandGuard bg;
+    BgPrepare(bg, 48000, 2);
+    BgSet(bg, BgParams(true, -24.0f, true, -24.0f));
+
+    // 1 kHz is far from both centres (the band-passes let through 0.26 and 0.45 of it), so both bands read under -24 dB.
+    const std::vector<float> in = Sine(48000.0, 2, 1000.0, 0.1, 48000);
+    std::vector<float> out;
+    CutPeaks peaks;
+    BgRun(bg, in, 2, out, 480, &peaks);
+    CHECK(SameBits(in, out), "the output is not a bit-exact copy of the input (differs by up to %.3g)", MaxAbsDiff(in, out));
+    CHECK(peaks.bass == 0.0f && peaks.treble == 0.0f, "a cut moved (bass %.4f dB, treble %.4f dB), want both exactly 0",
+          peaks.bass, peaks.treble);
+}
+
+static void T32_bandguard_never_boosts() {
+    // Both bands on at -60 dB: every tone below is far over both caps, so each band makes its 12 dB maximum cut.
+    const double freqs[] = {40.0, 80.0, 160.0, 320.0, 640.0, 1000.0, 2000.0, 3500.0, 5000.0, 8000.0, 12000.0, 16000.0};
+    for (double freq : freqs) {
+        sp::BandGuard bg;
+        BgPrepare(bg, 48000, 2);
+        BgSet(bg, BgParams(true, -60.0f, true, -60.0f));
+        std::vector<float> out;
+        BgRun(bg, Sine(48000.0, 2, freq, 0.5, 48000), 2, out);
+        const double peak = PeakAbs(out, (48000 - Frames(0.200, 48000.0)) * 2);
+        CHECK(peak <= 0.5 * 1.0001, "%g Hz: the settled peak is %.6f, above the input's 0.5", freq, peak);
+        CHECK(bg.BassCutDb() > 11.9f && bg.TrebleCutDb() > 11.9f,
+              "%g Hz: the cuts are %.3f dB (bass) and %.3f dB (treble), want both at the 12 dB maximum", freq,
+              bg.BassCutDb(), bg.TrebleCutDb());
+    }
+
+    // 1 s of white noise (uniform +-0.5): over the last half second the output holds no more energy than the input.
+    const std::vector<float> noise = WhiteNoise(48000, 2, 0.5, 20251117u);
+    sp::BandGuard bg;
+    BgPrepare(bg, 48000, 2);
+    BgSet(bg, BgParams(true, -60.0f, true, -60.0f));
+    std::vector<float> out;
+    BgRun(bg, noise, 2, out);
+    double energyIn = 0.0, energyOut = 0.0;
+    for (size_t i = 24000 * 2; i < noise.size(); ++i) {
+        energyIn += static_cast<double>(noise[i]) * static_cast<double>(noise[i]);
+        energyOut += static_cast<double>(out[i]) * static_cast<double>(out[i]);
+    }
+    CHECK(energyOut <= energyIn, "white noise: the output energy %.3f is above the input energy %.3f", energyOut, energyIn);
+    CHECK(bg.BassCutDb() > 11.9f && bg.TrebleCutDb() > 11.9f, "white noise: the cuts are %.3f and %.3f dB, want both at 12",
+          bg.BassCutDb(), bg.TrebleCutDb());
+}
+
+static void T33_bandguard_max_cut_is_12_db() {
+    sp::BandGuard bg;
+    BgPrepare(bg, 48000, 2);
+    BgSet(bg, BgParams(false, 0.0f, true, -60.0f));
+
+    std::vector<float> out;
+    BgRun(bg, Sine(48000.0, 2, 3500.0, 0.5, 48000), 2, out);
+    for (uint32_t c = 0; c < 2; ++c) {
+        const double settled = SettledDb(out, 2, c, 48000.0);
+        CHECK(Near(settled, -18.0, 0.1), "channel %u settles at %.3f dB, want -18.0 +- 0.1 (-6 - 12)", c, settled);
+    }
+    CHECK(Near(bg.TrebleCutDb(), 12.0, 0.01), "the treble cut is %.4f dB, want 12.0 +- 0.01", bg.TrebleCutDb());
+}
+
+static void T34_bandguard_release_returns_to_exact_copy() {
+    sp::BandGuard bg;
+    BgPrepare(bg, 48000, 2);
+    BgSet(bg, BgParams(false, 0.0f, true, -26.0f));
+
+    // 500 ms of 3500 Hz at 0.1, then 3 s of 1000 Hz at 0.01, which is far under the cap in the treble band. Both pieces
+    // are whole periods, so the switch has no click of its own.
+    const size_t toneFrames = Frames(0.500, 48000.0);
+    const std::vector<float> tone = Sine(48000.0, 2, 3500.0, 0.1, toneFrames);
+    const std::vector<float> quiet = Sine(48000.0, 2, 1000.0, 0.01, Frames(3.0, 48000.0), 0.0, toneFrames);
+    std::vector<float> out, bassCut, trebleCut;
+    BgRun(bg, tone, 2, out);
+    CHECK(bg.TrebleCutDb() > 5.0f, "the tone is cut by only %.3f dB before the switch", bg.TrebleCutDb());
+    BgRunPerFrame(bg, quiet, 2, out, bassCut, trebleCut);
+
+    const size_t zero = FirstZero(trebleCut);
+    CHECK(zero < Frames(1.5, 48000.0), "the treble cut is first exactly 0 at frame %zu after the switch, want within 1.5 s (72000)",
+          zero);
+    bool stays = true;
+    for (size_t i = zero; i < trebleCut.size(); ++i) stays = stays && trebleCut[i] == 0.0f;
+    CHECK(stays, "the treble cut left 0 again after it had reached 0");
+
+    std::vector<float> in = tone;
+    Append(in, quiet);
+    CHECK(SameBitsFrom(in, out, (toneFrames + zero) * 2), "from the frame where the cut reads 0 the output is not a bit-exact "
+          "copy of the input (differs by up to %.3g)", MaxAbsDiff(in, out));
+}
+
+static void T35_bandguard_switching_off_releases_smoothly() {
+    ExpectSwitchOffReleases(false, false, 3500.0, 1.5, "Part A (trebleOn = false)");
+    ExpectSwitchOffReleases(false, true, 3500.0, 1.5, "Part B (enabled = false)");
+    // Part C (not in the brief): the bass band the same way. Its release is twice as slow (300 ms), so its 6 dB need
+    // about 1.9 s to fall to the 0.01 dB where the cut snaps to 0.
+    ExpectSwitchOffReleases(true, false, 160.0, 2.5, "Part C (bassOn = false)");
+    ExpectSwitchOffReleases(true, true, 160.0, 2.5, "Part C (bass, enabled = false)");
+}
+
+static void T36_bandguard_nonfinite_and_huge_input_safe() {
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float inf = std::numeric_limits<float>::infinity();
+    const float big = std::numeric_limits<float>::max();
+
+    // Part A: bands off. NaN, +Inf and -Inf come out as exactly 0 and every other sample is unchanged, in both channels.
+    sp::BandGuard off;
+    BgPrepare(off, 48000, 2);
+    std::vector<float> a = Sine(48000.0, 2, 1000.0, 0.1, 6000);
+    const float bad[3] = {nan, inf, -inf};
+    for (size_t k = 0; k < 3; ++k) {
+        a[(1000 + k) * 2] = bad[k];
+        a[(1000 + k) * 2 + 1] = bad[(k + 1) % 3];
+    }
+    std::vector<float> outA;
+    BgRun(off, a, 2, outA);
+    const size_t wrongA = FirstNotSanitised(a, outA);
+    CHECK(wrongA == a.size(), "bands off: sample %zu comes out as %g from %g, want a copy with NaN and Inf as exactly 0", wrongA,
+          static_cast<double>(outA[wrongA]), static_cast<double>(a[wrongA]));
+
+    // Part B: both bands on at -30. 100 ms of +-FLT_MAX (the sign flips every frame) with a NaN now and then in one channel,
+    // then 5 s of a quiet 1000 Hz tone.
+    const size_t hugeFrames = Frames(0.100, 48000.0);
+    std::vector<float> b(hugeFrames * 2);
+    for (size_t n = 0; n < hugeFrames; ++n) {
+        const float s = (n % 2 == 0) ? big : -big;
+        b[n * 2] = (n % 97 == 5) ? nan : s;
+        b[n * 2 + 1] = (n % 131 == 7) ? nan : s;
+    }
+    Append(b, Sine(48000.0, 2, 1000.0, 0.01, Frames(5.0, 48000.0)));
+    sp::BandGuard bg;
+    BgPrepare(bg, 48000, 2);
+    BgSet(bg, BgParams(true, -30.0f, true, -30.0f));
+    std::vector<float> outB;
+    CutPeaks peaks;
+    BgRun(bg, b, 2, outB, 480, &peaks);
+    CHECK(AllFinite(outB), "an output sample is NaN or infinite");
+    CHECK(peaks.bass > 10.0f && peaks.treble > 10.0f, "the huge input moved the cuts only to %.3f dB (bass) and %.3f dB (treble)",
+          peaks.bass, peaks.treble);
+    CHECK(bg.BassCutDb() == 0.0f && bg.TrebleCutDb() == 0.0f, "5 s after the huge input the cuts read %.4f dB (bass) and %.4f dB "
+          "(treble), want exactly 0", bg.BassCutDb(), bg.TrebleCutDb());
+    CHECK(SameBitsFrom(b, outB, b.size() - Frames(0.200, 48000.0) * 2),
+          "the last 200 ms are not a bit-exact copy of the input (differs by up to %.3g)", MaxAbsDiff(b, outB));
+
+    // Part C (not in the brief): the caps in SetParams. A cap is clamped to [-60, 0] dB, and a cap that is not finite is
+    // ignored (the old one stays: the library's rule for parameters, the brief's "NaN keeps the old value"). Every probe
+    // sets the given caps one after the other on a fresh guard, runs 1 s of a 3500 Hz tone through it and reads the treble
+    // cut. The tones are picked so that a missing clamp shows: -80 dB is under a cap of -60 but over one of -200, and
+    // +1.6 dB (amplitude 1.2) is over a cap of 0 but under one of +5.
+    const auto trebleCutAfter = [](std::initializer_list<float> caps, double amp) {
+        sp::BandGuard g;
+        BgPrepare(g, 48000, 2);
+        for (float cap : caps) BgSet(g, BgParams(false, 0.0f, true, cap));
+        std::vector<float> sink;
+        BgRun(g, Sine(48000.0, 2, 3500.0, amp, 48000), 2, sink);
+        return static_cast<double>(g.TrebleCutDb());
+    };
+    const double plain = trebleCutAfter({-26.0f}, 0.1);
+    CHECK(Near(plain, 6.0, 0.3), "a cap of -26 dB on a -20 dB tone: the treble cut is %.3f dB, want about 6", plain);
+    const double afterNan = trebleCutAfter({-26.0f, nan}, 0.1);
+    CHECK(Near(afterNan, 6.0, 0.3), "a NaN cap after -26 dB: the treble cut is %.3f dB, want the old 6", afterNan);
+    const double afterMinusInf = trebleCutAfter({-26.0f, -inf}, 0.1);
+    CHECK(Near(afterMinusInf, 6.0, 0.3), "a -Inf cap after -26 dB: the treble cut is %.3f dB, want the old 6 (a clamp to -60 would give 12)",
+          afterMinusInf);
+    const double afterPlusInf = trebleCutAfter({-26.0f, inf}, 0.1);
+    CHECK(Near(afterPlusInf, 6.0, 0.3), "a +Inf cap after -26 dB: the treble cut is %.3f dB, want the old 6 (a clamp to 0 would give 0)",
+          afterPlusInf);
+    const double belowRange = trebleCutAfter({-200.0f}, 1.0e-4);
+    CHECK(belowRange == 0.0, "a cap of -200 dB on a -80 dB tone: the treble cut is %.3f dB, want 0 (the cap is clamped to -60, which the tone is under)",
+          belowRange);
+    const double aboveRange = trebleCutAfter({5.0f}, 1.2);
+    CHECK(Near(aboveRange, 1.6, 0.3), "a cap of +5 dB on a +1.6 dB tone: the treble cut is %.3f dB, want about 1.6 (the cap is clamped to 0 dB)",
+          aboveRange);
+}
+
+static void T37_bandguard_in_place_and_chunk_size_independent() {
+    const std::vector<float> in = SpeechLike(48000.0, 2, 2.0);
+    const size_t frames = in.size() / 2;
+
+    // One call, chunks of 1, 7 and 480: bit-identical. Chunks of 1 come first: they are the reference, and reading the cuts
+    // after every frame shows that both bands really cut in this run.
+    const size_t chunks[] = {1, 7, 480, frames};
+    std::vector<float> reference;
+    for (size_t chunk : chunks) {
+        sp::BandGuard bg;
+        BgPrepare(bg, 48000, 2);
+        BgSet(bg, BgParams(true, -30.0f, true, -30.0f));
+        std::vector<float> out;
+        CutPeaks peaks;
+        BgRun(bg, in, 2, out, chunk, &peaks);
+        if (reference.empty()) {
+            reference = out;
+            CHECK(peaks.bass > 2.0f && peaks.treble > 2.0f, "the cuts reach only %.3f dB (bass) and %.3f dB (treble): the test proves nothing",
+                  peaks.bass, peaks.treble);
+            continue;
+        }
+        CHECK(SameBits(reference, out), "chunk size %zu differs from chunk size 1 (by up to %.3g)", chunk, MaxAbsDiff(reference, out));
+    }
+    CHECK(MaxAbsDiff(in, reference) > 0.005, "the guard left the signal alone: the test proves nothing");
+
+    // In place, in chunks of 480.
+    sp::BandGuard inPlace;
+    BgPrepare(inPlace, 48000, 2);
+    BgSet(inPlace, BgParams(true, -30.0f, true, -30.0f));
+    std::vector<float> buf = in;
+    BgRunInPlace(inPlace, buf, 2);
+    CHECK(SameBits(reference, buf), "the in-place output differs from the out-of-place one (by up to %.3g)", MaxAbsDiff(reference, buf));
+
+    // Part B (not in the brief): Reset() returns the object to its just-prepared state and keeps the parameters.
+    sp::BandGuard again;
+    BgPrepare(again, 48000, 2);
+    BgSet(again, BgParams(true, -30.0f, true, -30.0f));
+    std::vector<float> first, second;
+    BgRun(again, in, 2, first);
+    again.Reset();
+    CHECK(again.BassCutDb() == 0.0f && again.TrebleCutDb() == 0.0f, "after Reset() the cuts read %.4f and %.4f dB, want 0",
+          again.BassCutDb(), again.TrebleCutDb());
+    BgRun(again, in, 2, second);
+    CHECK(SameBits(first, second), "after Reset() the same input gives a different output (by up to %.3g)", MaxAbsDiff(first, second));
+}
+
+static void T38_bandguard_formats() {
+    const uint32_t rates[] = {8000, 44100, 96000, 192000, 768000};
+    for (uint32_t fs : rates) {
+        char what[64];
+        std::snprintf(what, sizeof what, "%u Hz, 2 ch", fs);
+        sp::BandGuard bg;
+        BgPrepare(bg, fs, 2);
+        BgSet(bg, BgParams(false, 0.0f, true, -26.0f));
+        ExpectTrebleToneCapped(bg, fs, 2, what);
+        CHECK(bg.LatencyFrames() == 0, "%s: LatencyFrames() is %u, want 0", what, bg.LatencyFrames());
+    }
+    const uint32_t channelCounts[] = {1, 6, 64};
+    for (uint32_t ch : channelCounts) {
+        char what[64];
+        std::snprintf(what, sizeof what, "48000 Hz, %u ch", ch);
+        sp::BandGuard bg;
+        BgPrepare(bg, 48000, ch);
+        BgSet(bg, BgParams(false, 0.0f, true, -26.0f));
+        ExpectTrebleToneCapped(bg, 48000, ch, what);
+        CHECK(bg.LatencyFrames() == 0, "%s: LatencyFrames() is %u, want 0", what, bg.LatencyFrames());
+    }
+}
+
+static void T39_bandguard_unprepared_passes_sanitised() {
+    // Part A: a guard that is cutting is prepared again for a format it refuses. Prepare must not allocate and must leave no
+    // cut behind; Process then copies frames x (the channel count it was given) samples, NaN and Inf as exactly 0 and every
+    // other sample unchanged (no clamp: the Safety Cap behind the guard does that), with no cut and no delay, and writes
+    // nothing past the end. Every case runs twice: into a separate output buffer of 7.0f, and in place.
+    struct Refused { uint32_t fs, ch; };
+    const Refused refused[] = {{7999, 2}, {48000, 65}};
+    const uint32_t frames = 37;
+    for (const Refused& f : refused) {
+        for (int mode = 0; mode < 2; ++mode) {
+            const bool inPlace = mode == 1;
+            char what[96];
+            std::snprintf(what, sizeof what, "refused %u Hz / %u ch, %s", f.fs, f.ch, inPlace ? "in place" : "in != out");
+
+            sp::BandGuard bg;
+            BgPrepare(bg, 48000, 2);
+            BgSet(bg, BgParams(true, -60.0f, true, -60.0f));
+            std::vector<float> scratch;
+            BgRun(bg, Sine(48000.0, 2, 3500.0, 0.5, 24000), 2, scratch);          // a good format with loud sound in it ...
+            CHECK(bg.TrebleCutDb() > 5.0f, "%s: the treble cut is only %.3f dB before the refused Prepare", what, bg.TrebleCutDb());
+
+            unsigned long heapEvents = 0;
+            {
+                NoAlloc guard;
+                bg.Prepare(f.fs, f.ch);                                            // ... then a refused one on the same object
+                heapEvents = g_heapEvents;
+            }
+            CHECK(heapEvents == 0, "%s: Prepare made %lu heap allocation(s) or free(s), want 0", what, heapEvents);
+            CHECK(bg.BassCutDb() == 0.0f && bg.TrebleCutDb() == 0.0f, "%s: stale cuts (%.3f dB bass, %.3f dB treble)", what,
+                  bg.BassCutDb(), bg.TrebleCutDb());
+            CHECK(bg.LatencyFrames() == 0, "%s: LatencyFrames() is %u, want 0", what, bg.LatencyFrames());
+
+            const GuardedRun r = RunGuarded(FailClosedProbe(frames, f.ch, 1.0), frames, inPlace,
+                                            [&bg](const float* pin, float* pout, uint32_t pn) {
+                                                NoAlloc rt;
+                                                bg.Process(pin, pout, pn);
+                                            });
+            const size_t wrong = FirstNotSanitised(r.in, r.out);
+            CHECK(wrong == r.in.size(), "%s: sample %zu comes out as %g from %g, want a copy with NaN and Inf as exactly 0", what,
+                  wrong, static_cast<double>(r.out[wrong]), static_cast<double>(r.in[wrong]));
+            CHECK(r.guardIntact, "%s: Process wrote past the end of the buffer", what);
+        }
+    }
+
+    // Part B: never prepared, 0 channels, and the way back. The channel count is then unknown and Process writes nothing (a
+    // caller error). A later valid Prepare keeps the parameters set before it and processes normally.
+    sp::BandGuard bg;
+    BgSet(bg, BgParams(false, 0.0f, true, -26.0f));
+    for (int mode = 0; mode < 2; ++mode) {
+        const bool inPlace = mode == 1;
+        ExpectWritesNothing([&bg](const float* pin, float* pout, uint32_t pn) {
+                                NoAlloc rt;
+                                bg.Process(pin, pout, pn);
+                            },
+                            2, frames, inPlace, inPlace ? "never prepared, in place" : "never prepared, in != out");
+    }
+    BgPrepare(bg, 48000, 0);
+    for (int mode = 0; mode < 2; ++mode) {
+        const bool inPlace = mode == 1;
+        ExpectWritesNothing([&bg](const float* pin, float* pout, uint32_t pn) {
+                                NoAlloc rt;
+                                bg.Process(pin, pout, pn);
+                            },
+                            2, frames, inPlace, inPlace ? "Prepare(48000, 0), in place" : "Prepare(48000, 0), in != out");
+    }
+    BgPrepare(bg, 48000, 2);
+    ExpectTrebleToneCapped(bg, 48000, 2, "a valid Prepare after the refused ones");
+}
+
+// 1 s of 3500 Hz on ch channels: amplitude 0.1 (-20 dB, 6 dB over a cap of -26) on channel `loud`, and 0.01 (14 dB under
+// that cap) on every other channel. The loudest channel decides, and every channel gets that one cut, so the loud channel
+// settles at -26 dB and each other channel at -46 dB.
+static void ExpectLoudChannelDecides(uint32_t ch, uint32_t loud, const char* what) {
+    sp::BandGuard bg;
+    BgPrepare(bg, 48000, ch);
+    BgSet(bg, BgParams(false, 0.0f, true, -26.0f));
+    std::vector<float> in(48000 * static_cast<size_t>(ch));
+    for (size_t n = 0; n < 48000; ++n) {
+        const double s = std::sin(kTwoPi * 3500.0 * static_cast<double>(n) / 48000.0);
+        for (uint32_t c = 0; c < ch; ++c) in[n * ch + c] = static_cast<float>((c == loud ? 0.1 : 0.01) * s);
+    }
+    std::vector<float> out;
+    BgRun(bg, in, ch, out);
+    for (uint32_t c = 0; c < ch; ++c) {
+        const double want = (c == loud) ? -26.0 : -46.0;
+        const double level = SettledDb(out, ch, c, 48000.0);
+        CHECK(Near(level, want, 0.5), "%s: channel %u settles at %.3f dB, want %.1f +- 0.5", what, c, level, want);
+    }
+}
+
+static void T40_bandguard_channels_linked() {
+    // The brief's case: left 0.1, right 0.01 (settled left -26.0 +- 0.5 dB, right -46.0 +- 0.5 dB, the same 6 dB cut).
+    ExpectLoudChannelDecides(2, 0, "left loud");
+    // Not in the brief: the loud channel is not the first one. "Channel 0 decides" would pass the case above.
+    ExpectLoudChannelDecides(2, 1, "right loud");
+    ExpectLoudChannelDecides(64, 63, "64 channels, only the last loud");
+}
+
+// ================================================================================================
 // Runner
 // ================================================================================================
 
@@ -1825,10 +2436,23 @@ static const TestCase kTests[] = {
     TEST(T25_safetycap_chunk_size_independent),
     TEST(T26_ceiling_rule),
     TEST(T27_channel_weights_from_mask),
+    TEST(T28_bandguard_idle_is_bit_exact),
+    TEST(T29_bandguard_treble_centre_tone_capped),
+    TEST(T30_bandguard_bass_centre_tone_capped),
+    TEST(T31_bandguard_tone_between_bands_untouched),
+    TEST(T32_bandguard_never_boosts),
+    TEST(T33_bandguard_max_cut_is_12_db),
+    TEST(T34_bandguard_release_returns_to_exact_copy),
+    TEST(T35_bandguard_switching_off_releases_smoothly),
+    TEST(T36_bandguard_nonfinite_and_huge_input_safe),
+    TEST(T37_bandguard_in_place_and_chunk_size_independent),
+    TEST(T38_bandguard_formats),
+    TEST(T39_bandguard_unprepared_passes_sanitised),
+    TEST(T40_bandguard_channels_linked),
 };
 
-// The brief lists exactly 27 tests; a missing or extra registration is a compile error, not a silent gap.
-static_assert(sizeof(kTests) / sizeof(kTests[0]) == 27, "the brief pins exactly 27 tests");
+// The plan pins exactly 40 tests; a missing or extra registration is a compile error, not a silent gap.
+static_assert(sizeof(kTests) / sizeof(kTests[0]) == 40, "the plan pins exactly 40 tests");
 
 int main() {
     const int total = static_cast<int>(sizeof(kTests) / sizeof(kTests[0]));

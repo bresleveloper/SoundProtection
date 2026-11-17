@@ -1,9 +1,9 @@
 // SpRuntime.h - process-wide state of the Sound Protection plug-in.
 //
 // One Runtime exists per process (per loaded copy of the DLL). It owns:
-//   - the settings every effect reads on the audio path (cap, margin, enabled, safe mode), published through a
-//     sequence-numbered set of atomics, so the audio path never takes a lock,
-//   - the worker thread (50 ms tick): config.bin watcher, telemetry writer, health check, log flusher,
+//   - the settings every effect reads on the audio path (cap, margin, enabled, safe mode, and the V2 bass and treble
+//     caps from bands.bin), published through a sequence-numbered set of atomics, so the audio path never takes a lock,
+//   - the worker thread (50 ms tick): config.bin and bands.bin watchers, telemetry writer, health check, log flusher,
 //   - the memory-mapped telemetry file, the crash-loop guard file and the log file,
 //   - the table of 32 telemetry slots, one per locked effect.
 //
@@ -41,12 +41,17 @@ constexpr uint32_t kSettingsSafe    = 0x2;  // crash-loop guard tripped: clamp-o
 // What the telemetry file shows for "no signal".
 constexpr float kTelemetryFloorDb = -120.0f;
 
-// The settings the audio path follows. They always come from a validated, clamped config (or the defaults).
+// The settings the audio path follows. They always come from a validated, clamped config and bands file (or the defaults).
 struct Settings {
     float    capDb    = sp::kDefaultCapDb;
     float    marginDb = sp::kDefaultMarginDb;
     uint32_t flags    = kSettingsEnabled;
     uint32_t seq      = 0;  // the publication this copy was read from
+
+    // bands.bin (V2). Both caps are off until a good file says otherwise. Only the Safety Cap reads these.
+    uint32_t bandFlags   = 0;     // sp::kBandBass | sp::kBandTreble: which of the two caps is on
+    float    bassCapDb   = 0.0f;  // clamped to [sp::kMinBandCapDb, sp::kMaxBandCapDb]; NaN read as 0
+    float    trebleCapDb = 0.0f;  // the same
 
     bool Enabled() const { return (flags & kSettingsEnabled) != 0; }
     bool Safe() const { return (flags & kSettingsSafe) != 0; }
@@ -79,6 +84,8 @@ struct SlotRt {
     std::atomic<float>    gainReductionDb{0.0f};
     std::atomic<float>    maxGainReductionDb{0.0f};
     std::atomic<float>    outputPeakLin{0.0f};  // linear; the worker converts to dB once per tick
+    std::atomic<float>    bassCutDb{0.0f};      // safety cap: the bass cap's current cut, dB >= 0 (V2); the leveler leaves it 0
+    std::atomic<float>    trebleCutDb{0.0f};    // the same for the treble cap
 };
 
 class Runtime {
@@ -120,6 +127,7 @@ private:
     void StopWorkerLocked();
 
     void CheckConfig();
+    void CheckBands();  // bands.bin, the same way: worker or first-lock thread, never both at once
     void PublishSettingsLocked();
     void LatchSafeMode();
 
@@ -166,6 +174,7 @@ private:
     bool pathsFailed_ = false;
     wchar_t dataDir_[MAX_PATH] = {};
     wchar_t configPath_[MAX_PATH] = {};
+    wchar_t bandsPath_[MAX_PATH] = {};
     wchar_t telemetryPath_[MAX_PATH] = {};
     wchar_t guardPath_[MAX_PATH] = {};
     wchar_t logPath_[MAX_PATH] = {};
@@ -201,11 +210,24 @@ private:
     uint64_t sigSize_ = 0;
     bool     cfgInvalidLogged_ = false;
 
+    // ---- bands in use (state_): bands.bin, with its own change signature. Before the first good file both caps are off. ----
+    uint32_t bandSequence_ = 0;  // 0 = none yet
+    uint32_t bandFlags_ = 0;
+    float    bandBass_ = 0.0f;
+    float    bandTreble_ = 0.0f;
+    bool     bandsSigHave_ = false;
+    int64_t  bandsSigWrite_ = 0;
+    uint64_t bandsSigSize_ = 0;
+    bool     bandsInvalidLogged_ = false;
+
     // ---- settings publication: a sequence lock over atomics --------------------------------------------------------------
     std::atomic<uint32_t> setSeq_{0};  // even = stable, odd = being written
     std::atomic<float>    setCap_{sp::kDefaultCapDb};
     std::atomic<float>    setMargin_{sp::kDefaultMarginDb};
     std::atomic<uint32_t> setFlags_{kSettingsEnabled};
+    std::atomic<uint32_t> setBandFlags_{0};
+    std::atomic<float>    setBass_{0.0f};
+    std::atomic<float>    setTreble_{0.0f};
 
     // ---- crash-loop guard ---------------------------------------------------------------------------------------------------
     std::atomic<bool>     safe_{false};  // sticky for the life of this copy of the DLL

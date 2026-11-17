@@ -50,6 +50,8 @@ internal sealed class TrayApp : ApplicationContext
 
         _panel.Icon = _icons[IconKind.Watching];
         _panel.CeilingChanged += db => Mutate(s => s.CeilingDb = db);
+        _panel.BassChanged += db => Mutate(s => s.BassCapDb = db);
+        _panel.TrebleChanged += db => Mutate(s => s.TrebleCapDb = db);
         _panel.AlertsChanged += on =>
         {
             Mutate(s => s.AlertsEnabled = on);
@@ -142,7 +144,10 @@ internal sealed class TrayApp : ApplicationContext
         var copy = before.Clone();
         change(copy);
         _settings = copy;
-        if (copy.CeilingDb != before.CeilingDb || copy.ProtectionEnabled != before.ProtectionEnabled)
+        if (copy.CeilingDb != before.CeilingDb
+            || copy.ProtectionEnabled != before.ProtectionEnabled
+            || copy.BassCapDb != before.BassCapDb
+            || copy.TrebleCapDb != before.TrebleCapDb)
         {
             _sampler.RequestConfigWrite(); // after the new settings are in place; the write itself happens off this thread
         }
@@ -281,6 +286,7 @@ internal sealed class TrayApp : ApplicationContext
         var settings = _settings;
         _panel.SetOutputs(_source.ListOutputs(), settings.WatchedDeviceId);
         _panel.SetCeiling(settings.CeilingDb);
+        _panel.SetBands(settings.BassCapDb, settings.TrebleCapDb);
         _panel.SetAlerts(settings.AlertsEnabled);
         if (!_panel.Visible)
         {

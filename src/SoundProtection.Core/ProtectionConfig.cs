@@ -27,8 +27,6 @@ public static class ProtectionConfigFile
     private const uint FnvOffsetBasis = 2166136261;
     private const uint FnvPrime = 16777619;
     private const float CeilingMaxDb = -1.0f;
-    private const int MaxRetries = 10;
-    private const int RetryDelayMs = 50;
 
     public static uint Fnv1a(ReadOnlySpan<byte> data)
     {
@@ -105,57 +103,12 @@ public static class ProtectionConfigFile
     /// open for a moment, which makes the move fail; the write is tried again up to 10 times, 50 ms apart, and then
     /// throws. A missing folder is not retried and is never created: the folder belongs to the installer.
     /// </summary>
-    public static void Write(string path, ProtectionConfig config)
-    {
-        var bytes = ToBytes(config);
-        var temp = path + ".tmp";
-        for (var retry = 0; ; retry++)
-        {
-            try
-            {
-                File.WriteAllBytes(temp, bytes);
-                File.Move(temp, path, overwrite: true);
-                return;
-            }
-            catch (Exception ex) when (IsSharingProblem(ex))
-            {
-                if (retry >= MaxRetries)
-                {
-                    TryDelete(temp);
-                    throw;
-                }
-
-                Thread.Sleep(RetryDelayMs);
-            }
-            catch (Exception)
-            {
-                TryDelete(temp);
-                throw;
-            }
-        }
-    }
+    public static void Write(string path, ProtectionConfig config) => SharedFile.WriteReplacing(path, ToBytes(config));
 
     private static float ClampCap(float capDb) => float.IsNaN(capDb) ? DefaultCapDb : Math.Clamp(capDb, MinCapDb, MaxCapDb);
 
     private static float ClampMargin(float marginDb) =>
         float.IsNaN(marginDb) ? DefaultMarginDb : Math.Clamp(marginDb, MinMarginDb, MaxMarginDb);
-
-    // Windows reports a file that another process holds open as an IOException, or as UnauthorizedAccessException
-    // when the move would replace it. Both can pass in a moment. A missing folder will not.
-    private static bool IsSharingProblem(Exception ex) =>
-        ex is (IOException or UnauthorizedAccessException) and not DirectoryNotFoundException;
-
-    private static void TryDelete(string path)
-    {
-        try
-        {
-            File.Delete(path);
-        }
-        catch (Exception)
-        {
-            // A leftover temp file is overwritten by the next write.
-        }
-    }
 }
 
 /// <summary>
@@ -221,9 +174,12 @@ public sealed class ProtectionConfigWriter
     }
 }
 
-/// <summary>Reads small files that another process may have open for writing.</summary>
+/// <summary>Reads and writes small files that another process may have open.</summary>
 internal static class SharedFile
 {
+    private const int MaxRetries = 10;
+    private const int RetryDelayMs = 50;
+
     /// <summary>Up to <paramref name="maxBytes"/> from the start of the file, or null if it is missing or cannot be opened.</summary>
     public static byte[]? ReadUpTo(string path, int maxBytes)
     {
@@ -253,6 +209,57 @@ internal static class SharedFile
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             return null;
+        }
+    }
+
+    /// <summary>
+    /// Writes the bytes to <c>path + ".tmp"</c>, then moves that over <paramref name="path"/>. The plug-in may have the file
+    /// open for a moment, which makes the move fail; the write is tried again up to 10 times, 50 ms apart, and then
+    /// throws. A missing folder is not retried and is never created: the folder belongs to the installer.
+    /// </summary>
+    public static void WriteReplacing(string path, byte[] bytes)
+    {
+        var temp = path + ".tmp";
+        for (var retry = 0; ; retry++)
+        {
+            try
+            {
+                File.WriteAllBytes(temp, bytes);
+                File.Move(temp, path, overwrite: true);
+                return;
+            }
+            catch (Exception ex) when (IsSharingProblem(ex))
+            {
+                if (retry >= MaxRetries)
+                {
+                    TryDelete(temp);
+                    throw;
+                }
+
+                Thread.Sleep(RetryDelayMs);
+            }
+            catch (Exception)
+            {
+                TryDelete(temp);
+                throw;
+            }
+        }
+    }
+
+    // Windows reports a file that another process holds open as an IOException, or as UnauthorizedAccessException
+    // when the move would replace it. Both can pass in a moment. A missing folder will not.
+    private static bool IsSharingProblem(Exception ex) =>
+        ex is (IOException or UnauthorizedAccessException) and not DirectoryNotFoundException;
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (Exception)
+        {
+            // A leftover temp file is overwritten by the next write.
         }
     }
 }

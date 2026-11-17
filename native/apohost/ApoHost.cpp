@@ -3,6 +3,12 @@
 // and H14, which covers two calls the engine makes that the brief's list leaves out (Reset, a second Initialize).
 // H15 and H16 pin how the crash-loop guard treats a guard.bin that cannot be written or read (H15 takes about 26 s),
 // and H17 pins that a silent-flagged period still delivers the DSP's look-ahead tail.
+// H18 to H21 are the V2 bass and treble caps, through the DLL: H18 the output level, the cut telemetry, a re-lock at
+// another rate and protection switched off (parts A to D), then the first lock, Reset, a slot that is claimed again, the
+// numbers in the file, the guard ahead of the limiter and the bass cap (parts E to J); H19 a bands.bin that is bad or gone
+// (the last good caps stay); H20 that the caps add no latency; H21 that safe mode bypasses them. Each starts by writing
+// the bands.bin it needs (the next sequence number) and waits for the plug-in's "bands applied" line. The level and cut
+// asserts need the real DSP.
 //
 // Like the brief's set-up, every object is created through a test outer object (aggregated). H1 covers both ways of
 // creating an object, and H5 and H6 run once plain and once aggregated.
@@ -32,6 +38,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -162,6 +169,11 @@ const uint8_t kGolden1[32] = { 0x53, 0x50, 0x43, 0x46, 0x01, 0x00, 0x00, 0x00, 0
                                0x00, 0x00, 0xA0, 0xC1, 0x00, 0x00, 0x40, 0x41, 0x00, 0x00, 0x00, 0x00, 0xEA, 0xFA, 0xCF, 0x1E };
 const uint8_t kGolden2[32] = { 0x53, 0x50, 0x43, 0x46, 0x01, 0x00, 0x00, 0x00, 0x2A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                                0x00, 0x00, 0x0E, 0xC2, 0x00, 0x00, 0xC0, 0x40, 0x00, 0x00, 0x00, 0x00, 0x58, 0x06, 0x44, 0x0E };
+// bands.bin (V2): golden B1 (seq 1, bass on -30, treble on -35) and golden B2 (seq 42, treble only -27.5, bass 0).
+const uint8_t kGoldenB1[32] = { 0x53, 0x50, 0x42, 0x44, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00,
+                                0x00, 0x00, 0xF0, 0xC1, 0x00, 0x00, 0x0C, 0xC2, 0x00, 0x00, 0x00, 0x00, 0x3A, 0x06, 0x98, 0x16 };
+const uint8_t kGoldenB2[32] = { 0x53, 0x50, 0x42, 0x44, 0x01, 0x00, 0x00, 0x00, 0x2A, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00,
+                                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xDC, 0xC1, 0x00, 0x00, 0x00, 0x00, 0x4A, 0x2C, 0x0A, 0x69 };
 
 uint32_t Fnv1a(const uint8_t* p, size_t n) {
     uint32_t h = 2166136261u;
@@ -187,6 +199,26 @@ void MakeConfig(uint8_t out[32], uint32_t sequence, uint32_t enabled, float capD
 }
 
 bool WriteConfig(const uint8_t cfg[32]) { return WriteAll(DataPath(L"config.bin"), cfg, 32, false); }
+
+// A bands.bin with the checksum that fits its bytes. The magic and the version are the contract's, unless a check wants a
+// file that is well made but is not a version-1 bands file.
+void MakeBands(uint8_t out[32], uint32_t sequence, uint32_t flags, float bassCapDb, float trebleCapDb,
+               uint32_t magic = sp::kBandsMagic, uint32_t version = sp::kBandsVersion) {
+    sp::SpBands b{};
+    b.magic = magic;
+    b.version = version;
+    b.sequence = sequence;
+    b.flags = flags;
+    b.bassCapDb = bassCapDb;
+    b.trebleCapDb = trebleCapDb;
+    b.reserved = 0;
+    memcpy(out, &b, 28);
+    b.checksum = Fnv1a(out, 28);
+    memcpy(out + 28, &b.checksum, 4);
+}
+
+// Written in place, like config.bin, so that the plug-in never meets a file that is briefly empty.
+bool WriteBands(const uint8_t b[32]) { return WriteAll(DataPath(L"bands.bin"), b, 32, false); }
 
 bool ReadGuard(sp::SpGuard& g) {
     std::vector<uint8_t> raw;
@@ -2086,6 +2118,567 @@ void CheckH17(Check& c) {
 }
 
 // ===================================================================================================
+// H18 to H21  The V2 bass and treble caps
+// ===================================================================================================
+//
+// bands.bin sets the two caps, and the runtime's worker watches it the way it watches config.bin (every 200 ms). The
+// host processes audio far faster than real time, so it never processes before the plug-in has said that it applied a
+// new file (SetBands), and it reads a slot of the telemetry only from the snapshot that carries the frames it just
+// processed (WaitSlot): the worker writes one every 50 ms, and an older one still shows the stream before.
+//
+// The tone is 3500 Hz, the centre of the treble band, at -25 dB re full scale: 5 dB over a treble cap of -30 dB and far
+// under the Safety Cap's ceiling (-8 dB), so the limiter behind the caps has nothing to do and the caps alone decide the
+// level. The bass cap is off unless a check says otherwise.
+
+const double kToneAmp = std::pow(10.0, -25.0 / 20.0);  // -25 dB re full scale, 0.05623
+
+uint32_t g_bandsSeq = 0;  // the sequence number of the last bands.bin the host wrote; it only grows, across DLL reloads too
+
+// Waits (up to 2 s) until apo.log holds the text at least 'count' times. The log is cumulative for the whole run.
+bool WaitLogCount(const char* text, size_t count) {
+    const ULONGLONG t0 = GetTickCount64();
+    while (CountText(ReadLog(), text) < count) {
+        if (GetTickCount64() - t0 >= 2000) return false;
+        Sleep(10);
+    }
+    return true;
+}
+
+// Writes a bands.bin with the next sequence number and waits for the plug-in to say that it applied it. The plug-in's
+// worker has to be running, so an object must be alive. Every sequence number is used once, so the line cannot be an
+// old one.
+bool SetBands(Check& c, uint32_t flags, float bassCapDb, float trebleCapDb) {
+    uint8_t b[32];
+    const uint32_t seq = ++g_bandsSeq;
+    MakeBands(b, seq, flags, bassCapDb, trebleCapDb);
+    if (!WriteBands(b)) {
+        c.Fail("cannot write bands.bin");
+        return false;
+    }
+    const std::string want = Str("bands applied: sequence %u,", seq);
+    if (!WaitLogCount(want.c_str(), 1)) {
+        c.Fail(Str("within 2 s: apo.log has no '%s' line", want.c_str()));
+        return false;
+    }
+    return true;
+}
+
+// Six ways in which a bands.bin goes wrong, each made from the bytes of a good file (treble cap on at -30 dB): one byte
+// of the checksum flipped, one byte short, one byte too long, another magic, another version, and gone. The brief has
+// the first, the second and the last; H9 tries the torn files on config.bin; the last two are well-made files (the
+// checksum fits) that only the reader's magic and version checks can turn away.
+constexpr int kSpoilKinds = 6;
+const char* const kSpoilName[kSpoilKinds] = { "a file with a wrong checksum", "a 31-byte file", "a 33-byte file",
+                                              "a file with another magic", "a file of version 2", "a deleted file" };
+
+bool SpoilBands(int kind) {
+    uint8_t b[33];
+    const uint32_t seq = ++g_bandsSeq;
+    MakeBands(b, seq, sp::kBandTreble, 0.0f, -30.0f);
+    b[32] = 0;
+    switch (kind) {
+        case 0:
+            b[31] = static_cast<uint8_t>(b[31] ^ 0xFFu);
+            return WriteBands(b);
+        case 1:
+            return WriteAll(DataPath(L"bands.bin"), b, 31, true);
+        case 2:
+            return WriteAll(DataPath(L"bands.bin"), b, 33, true);
+        case 3:
+            MakeBands(b, seq, sp::kBandTreble, 0.0f, -30.0f, 0x454E4F4Eu /* "NONE" */, sp::kBandsVersion);
+            return WriteBands(b);
+        case 4:
+            MakeBands(b, seq, sp::kBandTreble, 0.0f, -30.0f, sp::kBandsMagic, sp::kBandsVersion + 1);
+            return WriteBands(b);
+        default:
+            return DeleteFileW(DataPath(L"bands.bin").c_str()) != 0;
+    }
+}
+
+// Waits until the worker has ticked 'ticks' more times (50 ms each). The plug-in looks at bands.bin every fourth tick, so
+// a file that it turns away without a log line (the episode's line is already written) needs about 12 ticks to be sure.
+bool WaitTicks(uint32_t ticks) {
+    Tel t;
+    if (!ReadTel(t)) return false;
+    const uint64_t from = t.H().heartbeat;
+    return PollTel(2000 + ticks * 50, t, [from, ticks](const Tel& x) { return x.H().heartbeat >= from + ticks; });
+}
+
+// The slot (of this kind: sp::kSlotLeveler or sp::kSlotSafetyCap) of the object that has processed exactly 'frames' frames
+// since its lock, at this sample rate: the snapshot that carries them. Its index goes to 'slot'.
+bool WaitSlot(Tel& t, uint32_t kind, uint32_t rate, uint64_t frames, int& slot) {
+    slot = -1;
+    return PollTel(1000, t, [&](const Tel& x) {
+        for (uint32_t i = 0; i < sp::kTelemetrySlots; ++i) {
+            const sp::SpTelemetrySlot& s = x.S(i);
+            if (s.kind == kind && s.sampleRate == rate && s.framesProcessed == frames) {
+                slot = static_cast<int>(i);
+                return true;
+            }
+        }
+        return false;
+    });
+}
+
+// What one run put into a locked, in-place object and got back, interleaved.
+struct SineRun {
+    std::vector<float> in, out;
+    uint32_t ch = 0;
+    bool good = true;  // every period came back BUFFER_VALID with all its frames, and every output sample is finite
+};
+
+// Feeds 'periods' periods of 480 frames of a sine to the object, the sine going on from frame 'pos' (which moves on).
+SineRun RunSine(Apo& a, uint64_t& pos, uint32_t periods, double amp, double hz) {
+    SineRun r;
+    r.ch = a.channels;
+    const uint32_t frames = 480;
+    const size_t n = static_cast<size_t>(frames) * a.channels;
+    r.in.reserve(n * periods);
+    r.out.reserve(n * periods);
+    for (uint32_t p = 0; p < periods; ++p) {
+        FillSine(a.In(), frames, a.channels, static_cast<double>(a.rate), amp, hz, pos);
+        r.in.insert(r.in.end(), a.In(), a.In() + n);
+        const Period res = a.Process(frames, BUFFER_VALID);
+        if (res.flags != static_cast<uint32_t>(BUFFER_VALID) || res.frames != frames || !AllFinite(a.Out(), n)) r.good = false;
+        r.out.insert(r.out.end(), a.Out(), a.Out() + n);
+        pos += frames;
+    }
+    return r;
+}
+
+// The peak, in dB re full scale, of the last 'frames' frames of an interleaved block (-200 for silence).
+double TailPeakDb(const std::vector<float>& v, uint32_t ch, size_t frames) {
+    const size_t n = frames * ch;
+    if (v.size() < n) return -200.0;
+    const double m = MaxAbs(v.data() + (v.size() - n), n);
+    return m > 0.0 ? 20.0 * std::log10(m) : -200.0;
+}
+
+// True when the last 'frames' frames of the output are the input delayed by 'delay' frames, bit for bit. 'worst' gets the
+// largest difference, for the failure text.
+bool IsDelayedCopy(const SineRun& r, uint32_t delay, size_t frames, double& worst) {
+    const size_t total = r.ch != 0 ? r.out.size() / r.ch : 0;
+    worst = 1e9;
+    if (frames + delay > total) return false;
+    const size_t from = total - frames;
+    const float* o = r.out.data() + from * r.ch;
+    const float* i = r.in.data() + (from - delay) * r.ch;
+    const size_t n = frames * r.ch;
+    worst = MaxDiff(o, i, n);
+    return std::memcmp(o, i, n * sizeof(float)) == 0;
+}
+
+// The latency the object reports, in frames (as H17 reads it): the Safety Cap's look-ahead and true-peak filter.
+uint32_t LatencyFramesOf(Apo& a) {
+    HNSTIME lat = 0;
+    a.apo->GetLatency(&lat);
+    return static_cast<uint32_t>(static_cast<double>(lat) * static_cast<double>(a.rate) / 1e7 + 0.5);
+}
+
+// ---- H18  Bass and treble caps through the DLL --------------------------------------------------------------------
+
+void CheckH18(Check& c) {
+    const bool real = !StubBuild();
+    std::string why;
+    c.Expect(WriteConfig(kGolden1), "cannot write config.bin");  // on, cap -20, margin 12: the ceiling is -8 dB
+    Apo cap;
+    if (!Bring(cap, 1, Format{ 48000, 2, 3 }, true, 480, why)) {
+        c.Fail(why);
+        return;
+    }
+    const size_t half48 = 24000;  // the last 0.5 s at 48 kHz
+    double worst = 0.0;
+    Tel t;
+    int slot = -1;
+
+    // Part A: the treble cap at -30 dB turns the tone at -25 dB down by the 5 dB it is over.
+    if (!SetBands(c, sp::kBandTreble, 0.0f, -30.0f)) return;
+    {
+        const std::string want = Str("bands applied: sequence %u, bass off 0.0 dB, treble on -30.0 dB", g_bandsSeq);
+        const std::string line = LastLineWith(ReadLog(), Str("bands applied: sequence %u,", g_bandsSeq).c_str());
+        c.Expect(line.find(want) != std::string::npos, Str("the 'applied' log line is '%s' (want it to say '%s')", line.c_str(), want.c_str()));
+    }
+    uint64_t pos = 0;
+    const SineRun a = RunSine(cap, pos, 200, kToneAmp, 3500.0);  // 2 s
+    c.Expect(a.good, "part A: a period came back malformed, or an output sample is not finite");
+    if (real) {
+        const double peak = TailPeakDb(a.out, 2, half48);
+        c.Expect(std::fabs(peak + 30.0) <= 0.7, Str("part A: the output peak over the last 0.5 s is %.2f dB (want -30.0 +- 0.7)", peak));
+        if (WaitSlot(t, sp::kSlotSafetyCap, 48000, pos, slot)) {
+            const sp::SpTelemetrySlot& s = t.S(static_cast<uint32_t>(slot));
+            c.Expect(Near(s.trebleCutDb, 5.0f, 0.7f), Str("part A: trebleCutDb is %.2f (want 5.0 +- 0.7)", s.trebleCutDb));
+            c.Expect(Near(s.bassCutDb, 0.0f, 1e-6f), Str("part A: bassCutDb is %g (want 0: the bass cap is off)", s.bassCutDb));
+        } else {
+            c.Fail(Str("part A: within 1 s: no Safety Cap slot with %llu frames at 48000 Hz", static_cast<unsigned long long>(pos)));
+        }
+    }
+
+    // Part B: a tone at 1000 Hz and -25 dB is under the treble cap (about -32 dB in the treble band): it is not touched at all,
+    // so the output is the input, delayed by the latency the object reports, bit for bit. The first 1.5 s are the cut of
+    // part A letting go (about 0.9 s); the last 0.5 s are after that.
+    const SineRun b = RunSine(cap, pos, 200, kToneAmp, 1000.0);
+    const uint32_t delay48 = LatencyFramesOf(cap);
+    c.Expect(b.good, "part B: a period came back malformed, or an output sample is not finite");
+    const bool copyB = IsDelayedCopy(b, delay48, half48, worst);  // before the message: it fills 'worst'
+    c.Expect(copyB, Str("part B: the output is not the input delayed by %u frames, bit for bit (differs by up to %g)", delay48, worst));
+
+    // Part C: the same level check after a re-lock at another sample rate (the filters are set up again).
+    cap.Unlock();
+    const HRESULT hr = cap.Lock(Format{ 44100, 2, 3 }, true, 480);
+    if (FAILED(hr)) {
+        c.Fail("part C: the lock at 44100 Hz failed " + HrText(hr));
+        return;
+    }
+    pos = 0;
+    const SineRun cr = RunSine(cap, pos, 184, kToneAmp, 3500.0);  // 184 periods of 480 frames: 2.0 s at 44.1 kHz
+    c.Expect(cr.good, "part C: a period came back malformed, or an output sample is not finite");
+    if (real) {
+        const double peak = TailPeakDb(cr.out, 2, 22050);
+        c.Expect(std::fabs(peak + 30.0) <= 0.7, Str("part C: the output peak over the last 0.5 s at 44100 Hz is %.2f dB (want -30.0 +- 0.7)", peak));
+    }
+
+    // Part D: protection switched off (config.bin "off", bands.bin unchanged) lets both caps go: the cut falls back to 0
+    // and the output is the input, delayed, bit for bit again. The cut of part C is still in force when the file changes.
+    uint8_t off[32];
+    MakeConfig(off, 7, 0, -20.0f, 12.0f);
+    c.Expect(WriteConfig(off), "cannot write config.bin with protection off");
+    if (!PollTel(600, t, [](const Tel& x) { return x.H().configSequence == 7 && (x.H().flags & sp::kFlagEnabled) == 0; })) {
+        c.Fail("part D: within 600 ms: the telemetry never showed the config with protection off");
+        return;
+    }
+    const SineRun d = RunSine(cap, pos, 184, kToneAmp, 3500.0);  // 2 s
+    const uint32_t delay44 = LatencyFramesOf(cap);
+    c.Expect(d.good, "part D: a period came back malformed, or an output sample is not finite");
+    const bool copyD = IsDelayedCopy(d, delay44, 22050, worst);
+    c.Expect(copyD, Str("part D: with protection off the output is not the input delayed by %u frames, bit for bit (differs by up to %g)",
+                        delay44, worst));
+    if (real) {
+        if (WaitSlot(t, sp::kSlotSafetyCap, 44100, pos, slot)) {
+            const sp::SpTelemetrySlot& s = t.S(static_cast<uint32_t>(slot));
+            c.Expect(Near(s.trebleCutDb, 0.0f, 1e-6f), Str("part D: trebleCutDb is %g (want 0 with protection off)", s.trebleCutDb));
+            c.Expect(Near(s.bassCutDb, 0.0f, 1e-6f), Str("part D: bassCutDb is %g (want 0)", s.bassCutDb));
+        } else {
+            c.Fail(Str("part D: within 1 s: no Safety Cap slot with %llu frames at 44100 Hz", static_cast<unsigned long long>(pos)));
+        }
+    }
+    c.Expect(WriteConfig(kGolden1), "cannot restore config.bin");
+
+    // Part E (beyond the brief's A to D): the first lock reads bands.bin too, as it reads config.bin (the first buffer must
+    // follow the files, not the defaults). The worker runs from the first lock until the last object is destroyed, and only
+    // a lock that starts it reads the files itself. So: destroy the only object, change the file (and the config, which part
+    // D left at "off": restored just above), and bring a new object up. The level cannot tell a plug-in that reads the file
+    // at the lock from one that leaves it to the worker, because the worker looks at the files at once when its thread starts
+    // (before the first period of sound). The log can: every line carries the id of the thread that wrote it, and the
+    // 'applied' line of this file must come from this thread, which locked the object, not from the worker. The level check
+    // is the re-locked object following the new file (the caps in use are -30 dB from part A, the file says -35).
+    cap.Cleanup();
+    {
+        uint8_t file[32];
+        MakeBands(file, ++g_bandsSeq, sp::kBandTreble, 0.0f, -35.0f);
+        if (!c.Expect(WriteBands(file), "part E: cannot write bands.bin")) return;
+    }
+    const uint32_t seqE = g_bandsSeq;
+    if (!Bring(cap, 1, Format{ 48000, 2, 3 }, true, 480, why)) {
+        c.Fail("part E: " + why);
+        return;
+    }
+    pos = 0;
+    const SineRun e = RunSine(cap, pos, 24, kToneAmp, 3500.0);  // 240 ms
+    c.Expect(e.good, "part E: a period came back malformed, or an output sample is not finite");
+    if (real) {
+        const double peak = TailPeakDb(e.out, 2, 2400);  // the last 50 ms: the cut of 10 dB has taken hold by then
+        c.Expect(std::fabs(peak + 35.0) <= 0.7,
+                 Str("part E: the output peak over the last 50 ms is %.2f dB (want -35.0 +- 0.7: the new file is in force)", peak));
+    }
+    if (c.Expect(WaitLogCount(Str("bands applied: sequence %u,", seqE).c_str(), 1),
+                 Str("part E: within 2 s: apo.log has no 'bands applied: sequence %u,' line", seqE))) {
+        const std::string lineE = LastLineWith(ReadLog(), Str("bands applied: sequence %u,", seqE).c_str());
+        const std::string mine = Str(" tid=%lu ", static_cast<unsigned long>(GetCurrentThreadId()));
+        c.Expect(lineE.find(mine) != std::string::npos,
+                 Str("part E: the 'applied' line is '%s' (want it written by the thread that locked the object, '%s': the first lock reads the file itself)",
+                     lineE.c_str(), mine.c_str()));
+    }
+
+    // Part F (beyond the brief): Reset clears the guard with the rest of the DSP. The cut of part E is 10 dB. After the Reset the
+    // first period is the limiter's look-ahead (zeros), then the sound from the start of the period, with the cut beginning at
+    // 0 again: at most a dB or two in the first 5 ms. A guard that kept its cut would show -35 dB from the first sample on.
+    {
+        const HRESULT hrR = cap.apo->Reset();
+        c.Expect(hrR == S_OK, Str("part F: Reset returned %s", HrText(hrR).c_str()));
+        const SineRun f = RunSine(cap, pos, 1, kToneAmp, 3500.0);
+        const uint32_t lat = LatencyFramesOf(cap);
+        c.Expect(f.good && lat < 480, "part F: the period after Reset came back malformed, or the latency is not under one period");
+        if (real && f.good && lat < 480) {
+            const size_t first = static_cast<size_t>(lat) * 2;
+            const double m = MaxAbs(f.out.data() + first, f.out.size() - first);
+            const double peak = m > 0.0 ? 20.0 * std::log10(m) : -200.0;
+            c.Expect(peak > -28.0, Str("part F: after Reset the sound of the first %u frames peaks at %.2f dB (want > -28: the cut starts again from 0; "
+                                       "a kept cut of 10 dB would show -35)", 480 - lat, peak));
+        }
+    }
+
+    // Part G (beyond the brief): a slot that is claimed again starts with no cut, whoever had it before. A Leveler never writes
+    // the two cut fields, so one that a Safety Cap left behind would stay in the Leveler's slot for as long as it lives.
+    // Both caps are on, and both cuts are held when the Safety Cap lets go: 160 Hz for 1 s builds the bass cut (5 dB), then
+    // 3500 Hz for 0.3 s builds the treble cut (10 dB) while the bass cut falls (its release is 300 ms: about 2 dB are left).
+    // A Leveler then takes the lowest free slot, the same one.
+    if (!SetBands(c, sp::kBandBass | sp::kBandTreble, -30.0f, -35.0f)) return;
+    const SineRun lowG = RunSine(cap, pos, 100, kToneAmp, 160.0);
+    const SineRun again = RunSine(cap, pos, 30, kToneAmp, 3500.0);
+    c.Expect(lowG.good && again.good, "part G: a period came back malformed, or an output sample is not finite");
+    if (real) {
+        if (WaitSlot(t, sp::kSlotSafetyCap, 48000, pos, slot)) {
+            const sp::SpTelemetrySlot& heldSlot = t.S(static_cast<uint32_t>(slot));
+            c.Expect(heldSlot.trebleCutDb > 8.0f && heldSlot.bassCutDb > 0.5f,
+                     Str("part G: the Safety Cap holds trebleCutDb %.2f and bassCutDb %.2f before it lets go (want about 10 and 2: the test needs a cut "
+                         "of each kind in the slot)", heldSlot.trebleCutDb, heldSlot.bassCutDb));
+        } else {
+            c.Fail(Str("part G: within 1 s: no Safety Cap slot with %llu frames at 48000 Hz", static_cast<unsigned long long>(pos)));
+        }
+    }
+    cap.Unlock();
+    Apo lev;  // stays locked to the end: it keeps the worker running for part H
+    if (!Bring(lev, 0, Format{ 48000, 2, 3 }, true, 480, why)) {
+        c.Fail("part G: " + why);
+        return;
+    }
+    if (real) {
+        if (WaitSlot(t, sp::kSlotLeveler, 48000, 0, slot)) {
+            const sp::SpTelemetrySlot& s = t.S(static_cast<uint32_t>(slot));
+            c.Expect(Near(s.trebleCutDb, 0.0f, 1e-6f) && Near(s.bassCutDb, 0.0f, 1e-6f),
+                     Str("part G: a new Leveler's slot says trebleCutDb %g, bassCutDb %g (want 0 and 0: nothing of the Safety Cap's cut may stay)",
+                         s.trebleCutDb, s.bassCutDb));
+        } else {
+            c.Fail("part G: within 1 s: no Leveler slot with 0 frames at 48000 Hz");
+        }
+    }
+
+    // Part H (beyond the brief): the numbers in a good file are read as the contract says (SpShared.h): each cap clamped to
+    // [-60, 0] dB, a NaN as 0, the infinities like any number out of range, and flag bits other than bass and treble ignored.
+    // The 'applied' line says what was taken. (H9 does the same for the config.)
+    {
+        const float nan = std::numeric_limits<float>::quiet_NaN();
+        const float inf = std::numeric_limits<float>::infinity();
+        struct Odd {
+            const char* what;
+            uint32_t flags;
+            float bass, treble;
+            const char* want;
+        };
+        const Odd odd[] = {
+            { "caps above 0 and below -60", sp::kBandBass | sp::kBandTreble, 5.0f, -100.0f, "bass on 0.0 dB, treble on -60.0 dB" },
+            { "infinite caps", sp::kBandBass | sp::kBandTreble, -inf, inf, "bass on -60.0 dB, treble on 0.0 dB" },
+            { "a NaN cap", sp::kBandBass | sp::kBandTreble, nan, -20.0f, "bass on 0.0 dB, treble on -20.0 dB" },
+            { "flag bits other than bass and treble", 0xFFFFFFFCu | sp::kBandTreble, -12.0f, -20.0f, "bass off -12.0 dB, treble on -20.0 dB" },
+        };
+        for (const Odd& o : odd) {
+            if (!SetBands(c, o.flags, o.bass, o.treble)) return;
+            const std::string prefix = Str("bands applied: sequence %u,", g_bandsSeq);
+            const std::string line = LastLineWith(ReadLog(), prefix.c_str());
+            const std::string want = prefix + " " + o.want;
+            c.Expect(line.find(want) != std::string::npos,
+                     Str("%s: the 'applied' line is '%s' (want it to say '%s')", o.what, line.c_str(), want.c_str()));
+        }
+    }
+    // Parts I and J (beyond the brief, real DSP only).
+    if (real) {
+        // Part I: the guard runs ahead of the limiter, as the brief's table has it. The tone at -3 dB is over the Safety Cap's
+        // ceiling (-8 dB) as it comes in. Guard first: the treble cap turns it down by its 12 dB maximum, to -15 dB, and the
+        // limiter behind it has nothing left to do. Limiter first: 5 dB down to the ceiling, then the 12 dB: -20 dB.
+        if (!SetBands(c, sp::kBandTreble, 0.0f, -30.0f)) return;
+        HRESULT hrLock = cap.Lock(Format{ 48000, 2, 3 }, true, 480);
+        if (FAILED(hrLock)) {
+            c.Fail("part I: the lock at 48000 Hz failed " + HrText(hrLock));
+            return;
+        }
+        pos = 0;
+        const SineRun loud = RunSine(cap, pos, 200, std::pow(10.0, -3.0 / 20.0), 3500.0);  // 2 s at -3 dB
+        c.Expect(loud.good, "part I: a period came back malformed, or an output sample is not finite");
+        const double loudPeak = TailPeakDb(loud.out, 2, half48);
+        c.Expect(std::fabs(loudPeak + 15.0) <= 1.0,
+                 Str("part I: the output peak over the last 0.5 s is %.2f dB (want -15.0 +- 1.0: the guard's 12 dB, then nothing for the limiter; "
+                     "with the limiter first it would be -20)", loudPeak));
+        cap.Unlock();
+
+        // Part J: the bass cap on its own, the treble cap off. Part G has the bass path only next to the treble cap and reads its
+        // cut only from the slot; here the sound itself shows it: a 160 Hz tone at -25 dB under a bass cap of -30 dB comes out
+        // 5 dB down, and the cut shows in bassCutDb, not in trebleCutDb.
+        if (!SetBands(c, sp::kBandBass, -30.0f, 0.0f)) return;
+        hrLock = cap.Lock(Format{ 48000, 2, 3 }, true, 480);
+        if (FAILED(hrLock)) {
+            c.Fail("part J: the lock at 48000 Hz failed " + HrText(hrLock));
+            return;
+        }
+        pos = 0;
+        const SineRun low = RunSine(cap, pos, 300, kToneAmp, 160.0);  // 3 s: the bass cut (300 ms release) has settled long before the end
+        c.Expect(low.good, "part J: a period came back malformed, or an output sample is not finite");
+        const double lowPeak = TailPeakDb(low.out, 2, half48);
+        c.Expect(std::fabs(lowPeak + 30.0) <= 0.7, Str("part J: the output peak over the last 0.5 s is %.2f dB (want -30.0 +- 0.7)", lowPeak));
+        if (WaitSlot(t, sp::kSlotSafetyCap, 48000, pos, slot)) {
+            const sp::SpTelemetrySlot& s = t.S(static_cast<uint32_t>(slot));
+            c.Expect(Near(s.bassCutDb, 5.0f, 0.7f), Str("part J: bassCutDb is %.2f (want 5.0 +- 0.7)", s.bassCutDb));
+            c.Expect(Near(s.trebleCutDb, 0.0f, 1e-6f), Str("part J: trebleCutDb is %g (want 0: the treble cap is off)", s.trebleCutDb));
+        } else {
+            c.Fail(Str("part J: within 1 s: no Safety Cap slot with %llu frames at 48000 Hz", static_cast<unsigned long long>(pos)));
+        }
+    } else {
+        c.Skip("parts A, C, D, E, F, G, I and J: the output level and the cut telemetry (the stub DSP applies no caps)");
+    }
+}
+
+// ---- H19  A missing or bad bands.bin leaves the last good caps -----------------------------------------------------
+
+void CheckH19(Check& c) {
+    const bool real = !StubBuild();
+    static const char kInvalid[] = "bands.bin is missing or invalid; keeping the last good values";
+    std::string why;
+    c.Expect(WriteConfig(kGolden1), "cannot write config.bin");
+    Apo cap;
+    if (!Bring(cap, 1, Format{ 48000, 2, 3 }, true, 480, why)) {
+        c.Fail(why);
+        return;
+    }
+    const uint32_t delay = LatencyFramesOf(cap);
+    const size_t half = 24000;
+    double worst = 0.0;
+    uint64_t pos = 0;
+
+    // The start: a good file with both caps off, applied. A good file also ends any earlier bad episode, so the
+    // 'missing or invalid' lines are counted from here.
+    if (!SetBands(c, 0, 0.0f, 0.0f)) return;
+    const size_t before = CountText(ReadLog(), kInvalid);
+
+    // Six bad files one after the other. What the treble cap would turn down if it were on at -30 dB (and it would be,
+    // if any of these had been taken for a good file) is 3500 Hz at -25 dB: with both caps off it must come out untouched.
+    for (int kind = 0; kind < kSpoilKinds; ++kind) {
+        if (!c.Expect(SpoilBands(kind), Str("cannot make %s", kSpoilName[kind]))) return;
+        if (kind == 0) {
+            // The first bad look of an episode is logged: that line also proves the file was looked at.
+            if (!WaitLogCount(kInvalid, before + 1)) {
+                c.Fail(Str("within 2 s: apo.log has no 'missing or invalid' line after %s", kSpoilName[kind]));
+                return;
+            }
+        } else {
+            WaitTicks(12);  // the episode's line is written already: wait for three looks at the file instead
+        }
+        const SineRun r = RunSine(cap, pos, 100, kToneAmp, 3500.0);  // 1 s
+        c.Expect(r.good, Str("%s: a period came back malformed, or an output sample is not finite", kSpoilName[kind]));
+        const bool copy = IsDelayedCopy(r, delay, half, worst);
+        c.Expect(copy, Str("%s: the output is not the input delayed by %u frames, bit for bit (differs by up to %g): the file was taken for a good one",
+                           kSpoilName[kind], delay, worst));
+    }
+    const size_t lines = CountText(ReadLog(), kInvalid) - before;
+    c.Expect(lines == 1, Str("apo.log has %zu 'missing or invalid' lines for one episode of %d bad files (want exactly 1)", lines, kSpoilKinds));
+
+    // A cap that is in force stays in force: with both caps off, the checks above cannot tell "the last good caps stay"
+    // from "the caps fall back to off". So: apply a good file with the treble cap on, let the cut take hold, spoil the file
+    // in each of the ways and keep processing. The tone must still come out 5 dB down, not back at -25 dB.
+    if (real) {
+        for (int kind = 0; kind < kSpoilKinds; ++kind) {
+            if (!SetBands(c, sp::kBandTreble, 0.0f, -30.0f)) return;
+            const SineRun on = RunSine(cap, pos, 200, kToneAmp, 3500.0);  // 2 s: the cut takes hold
+            const double onPeak = TailPeakDb(on.out, 2, half);
+            c.Expect(std::fabs(onPeak + 30.0) <= 0.7,
+                     Str("%s: before the file went bad the output peak was %.2f dB (want -30.0 +- 0.7: the cap is in force)", kSpoilName[kind], onPeak));
+            const size_t seen = CountText(ReadLog(), kInvalid);
+            if (!c.Expect(SpoilBands(kind), Str("cannot make %s", kSpoilName[kind]))) return;
+            if (!WaitLogCount(kInvalid, seen + 1)) {
+                c.Fail(Str("within 2 s: apo.log has no 'missing or invalid' line after %s", kSpoilName[kind]));
+                return;
+            }
+            const SineRun r = RunSine(cap, pos, 100, kToneAmp, 3500.0);  // 1 s
+            const double peak = TailPeakDb(r.out, 2, half);
+            c.Expect(r.good, Str("%s: a period came back malformed, or an output sample is not finite", kSpoilName[kind]));
+            c.Expect(std::fabs(peak + 30.0) <= 0.7,
+                     Str("%s: the output peak over the last 0.5 s is %.2f dB (want -30.0 +- 0.7: the last good caps stay in force)", kSpoilName[kind], peak));
+        }
+    } else {
+        c.Skip("the last good caps stay in force after a bad file (the stub DSP applies no caps, so there is no cut to keep)");
+    }
+
+    // A good file after the bad ones, the deleted one included, is applied again.
+    SetBands(c, 0, 0.0f, 0.0f);
+}
+
+// ---- H20  The caps add no latency ---------------------------------------------------------------------------------
+
+void CheckH20(Check& c) {
+    std::string why;
+    c.Expect(WriteConfig(kGolden1), "cannot write config.bin");
+    Apo cap;
+    if (!Bring(cap, 1, Format{ 48000, 2, 3 }, true, 480, why)) {
+        c.Fail(why);
+        return;
+    }
+    uint64_t pos = 0;
+    // The file's caps reach the DSP at the start of the next period, so one period goes through before the latency is read.
+    auto latencyWith = [&](uint32_t flags, float bass, float treble) {
+        HNSTIME lat = -1;
+        if (SetBands(c, flags, bass, treble)) {
+            RunSine(cap, pos, 1, kToneAmp, 3500.0);
+            cap.apo->GetLatency(&lat);
+        }
+        return lat;
+    };
+    const HNSTIME off = latencyWith(0, 0.0f, 0.0f);
+    const HNSTIME treble = latencyWith(sp::kBandTreble, 0.0f, -30.0f);
+    const HNSTIME both = latencyWith(sp::kBandBass | sp::kBandTreble, -30.0f, -30.0f);
+    const double want = (240.0 + 8.0) / 48000.0 * 1e7;  // the Safety Cap's own, as in H12
+    c.Expect(std::fabs(static_cast<double>(off) - want) <= 1.5,
+             Str("latency with both caps off is %lld (100 ns units), want %.2f +- 1", static_cast<long long>(off), want));
+    c.Expect(treble == off, Str("latency with the treble cap on is %lld, with both caps off %lld", static_cast<long long>(treble), static_cast<long long>(off)));
+    c.Expect(both == off, Str("latency with both caps on is %lld, with both caps off %lld", static_cast<long long>(both), static_cast<long long>(off)));
+}
+
+// ---- H21  Safe mode bypasses the caps -----------------------------------------------------------------------------
+
+void CheckH21(Check& c) {
+    std::string why;
+    // Safe mode the way H10 reaches it: three unclean starts in guard.bin, then a fresh copy of the DLL.
+    c.Expect(WriteGuard(3), "cannot write guard.bin");
+    c.Expect(WriteConfig(kGolden1), "cannot write config.bin");
+    if (!UnloadDll(why)) {
+        c.Fail("unload: " + why);
+        return;
+    }
+    if (!LoadDll(why)) {
+        c.Fail("reload: " + why);
+        return;
+    }
+    {
+        Apo cap;
+        if (!Bring(cap, 1, Format{ 48000, 2, 3 }, true, 480, why)) {
+            c.Fail(why);
+        } else {
+            Tel t;
+            c.Expect(PollTel(500, t, [](const Tel& x) { return (x.H().flags & sp::kFlagSafeMode) != 0; }),
+                     "within 500 ms: the SafeMode flag is not set after guard.bin said 3 unclean starts");
+            if (SetBands(c, sp::kBandTreble, 0.0f, -30.0f)) {
+                uint64_t pos = 0;
+                const SineRun r = RunSine(cap, pos, 200, kToneAmp, 3500.0);  // 2 s
+                c.Expect(r.good, "a period came back malformed, or an output sample is not finite");
+                const double peak = TailPeakDb(r.out, 2, 24000);
+                c.Expect(std::fabs(peak + 25.0) <= 0.1, Str("safe mode: the output peak over the last 0.5 s is %.3f dB (want -25.0 +- 0.1: the caps are bypassed)", peak));
+                int slot = -1;
+                if (WaitSlot(t, sp::kSlotSafetyCap, 48000, pos, slot)) {
+                    const sp::SpTelemetrySlot& s = t.S(static_cast<uint32_t>(slot));
+                    c.Expect(Near(s.trebleCutDb, 0.0f, 1e-6f), Str("safe mode: trebleCutDb is %g (want 0)", s.trebleCutDb));
+                    c.Expect(Near(s.bassCutDb, 0.0f, 1e-6f), Str("safe mode: bassCutDb is %g (want 0)", s.bassCutDb));
+                } else {
+                    c.Fail(Str("safe mode: within 1 s: no Safety Cap slot with %llu frames at 48000 Hz", static_cast<unsigned long long>(pos)));
+                }
+            }
+        }
+    }
+    // The safe-mode decision is for the life of the DLL: leave a clean load for what follows, as H10 does.
+    if (!UnloadDll(why)) {
+        c.Fail("second unload: " + why);
+        return;
+    }
+    if (!LoadDll(why)) c.Fail("second reload: " + why);
+}
+
+// ===================================================================================================
 // Driver
 // ===================================================================================================
 
@@ -2141,6 +2734,13 @@ int wmain(int argc, wchar_t** argv) {
             printf("FAIL setup: the host's config encoder does not reproduce the golden bytes\n");
             return 2;
         }
+        uint8_t b1[32], b2[32];
+        MakeBands(b1, 1, sp::kBandBass | sp::kBandTreble, -30.0f, -35.0f);
+        MakeBands(b2, 42, sp::kBandTreble, 0.0f, -27.5f);
+        if (memcmp(b1, kGoldenB1, 32) != 0 || memcmp(b2, kGoldenB2, 32) != 0) {
+            printf("FAIL setup: the host's bands encoder does not reproduce the golden bytes\n");
+            return 2;
+        }
     }
 
     wchar_t tmp[MAX_PATH] = {};
@@ -2189,6 +2789,10 @@ int wmain(int argc, wchar_t** argv) {
     Run("H15", CheckH15);
     Run("H16", CheckH16);
     Run("H17", CheckH17);
+    Run("H18", CheckH18);
+    Run("H19", CheckH19);
+    Run("H20", CheckH20);
+    Run("H21", CheckH21);
 
     // Clean-up: everything released, the DLL really unloads, the temp folder goes away.
     {

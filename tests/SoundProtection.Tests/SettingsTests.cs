@@ -207,4 +207,62 @@ public sealed class SettingsTests : IDisposable
         Assert.False(s.ProtectionEnabled);
         Assert.Equal(-25.0, s.CeilingDb);
     }
+
+    // ---- V2: the bass and treble caps. 0 dB is Off, so both start Off and a V1 file keeps the sound exactly as it was. ----
+
+    [Fact]
+    public void Defaults_BandsOff()
+    {
+        var built = new Settings();
+        Assert.Equal(0.0, built.BassCapDb);
+        Assert.Equal(0.0, built.TrebleCapDb);
+
+        var noFile = new SettingsStore(FilePath).Load();
+        Assert.Equal(0.0, noFile.BassCapDb);
+        Assert.Equal(0.0, noFile.TrebleCapDb);
+    }
+
+    [Theory]
+    [InlineData("{ \"settingsVersion\": 2, \"alertsEnabled\": false, \"ceilingDb\": -33, \"protectionEnabled\": false }")] // what V1 wrote
+    [InlineData("{ \"alertsEnabled\": false, \"ceilingDb\": -33 }")] // the ear-level build, which gets migrated
+    public void Load_V1File_BandsOff(string json)
+    {
+        WriteRaw(json);
+
+        var s = new SettingsStore(FilePath).Load();
+
+        Assert.Equal(0.0, s.BassCapDb);
+        Assert.Equal(0.0, s.TrebleCapDb);
+        Assert.False(s.AlertsEnabled); // the rest of the file is read as before
+    }
+
+    [Theory]
+    [InlineData(-100.0, 3.0, -60.0, 0.0)]
+    [InlineData(3.0, -100.0, 0.0, -60.0)]
+    [InlineData(-60.0, 0.0, -60.0, 0.0)]
+    public void Load_ClampsBands(double bass, double treble, double expectedBass, double expectedTreble)
+    {
+        WriteRaw(
+            "{ \"settingsVersion\": 2, \"bassCapDb\": " + bass.ToString(CultureInfo.InvariantCulture) +
+            ", \"trebleCapDb\": " + treble.ToString(CultureInfo.InvariantCulture) + " }");
+
+        var s = new SettingsStore(FilePath).Load();
+
+        Assert.Equal(expectedBass, s.BassCapDb);
+        Assert.Equal(expectedTreble, s.TrebleCapDb);
+    }
+
+    [Fact]
+    public void Save_Load_RoundTripsBands()
+    {
+        var store = new SettingsStore(FilePath);
+
+        store.Save(new Settings { BassCapDb = -30, TrebleCapDb = -35, CeilingDb = -25 });
+
+        var s = store.Load();
+        Assert.Equal(-30.0, s.BassCapDb);
+        Assert.Equal(-35.0, s.TrebleCapDb);
+        Assert.Equal(-25.0, s.CeilingDb);
+        Assert.Equal(Settings.CurrentVersion, s.SettingsVersion); // V2 adds fields, not a version: V1 can still read this file
+    }
 }
