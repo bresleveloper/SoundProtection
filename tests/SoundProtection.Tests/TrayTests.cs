@@ -241,3 +241,48 @@ public class TrayTextTests
         }
     }
 }
+
+public class ProtectDeviceTests
+{
+    private const string NotProtectedText =
+        @"Not protected: Windows offers no hook on this device, or the run failed. See C:\Program Files\SoundProtection\install-log.txt.";
+
+    private static ProtectionState State(ProtectionStatus status = ProtectionStatus.Protected, bool covered = true) =>
+        new(status, "any", 0.0, 0.0, 0.0, Array.Empty<AppTurnDown>(), WatchedOutputCovered: covered);
+
+    // The button goes by the output, not by the amber status: with no sound playing an uncovered output reads green (Idle),
+    // and the button must still be there, or the person who plugged the device in would never find it.
+    [Fact]
+    public void Button_shows_when_the_watched_output_is_not_covered_even_while_green()
+    {
+        Assert.True(ProtectDevice.ShouldShow(State(covered: false)));
+        Assert.True(ProtectDevice.ShouldShow(State(ProtectionStatus.NotProtected, false)));
+        Assert.True(ProtectDevice.ShouldShow(State(ProtectionStatus.Idle, false)));
+    }
+
+    // With the switch off the fix is the switch, not a run of the installer script.
+    [Fact]
+    public void Button_hides_when_the_protection_switch_is_off() =>
+        Assert.False(ProtectDevice.ShouldShow(State(ProtectionStatus.Off, false)));
+
+    [Fact]
+    public void Button_hides_when_the_watched_output_is_covered()
+    {
+        Assert.False(ProtectDevice.ShouldShow(State(ProtectionStatus.Protected, true)));
+        Assert.False(ProtectDevice.ShouldShow(State(ProtectionStatus.NotProtected, true)));
+        Assert.False(ProtectDevice.ShouldShow(State(ProtectionStatus.Idle, true)));
+    }
+
+    public static TheoryData<int, string> ResultMessages => new()
+    {
+        { 0, "Protected on this device." },
+        { 3, "Sound Protection is on, but Windows needs a restart of the PC before it runs. Restart, then try again." },
+        { 1, NotProtectedText },
+        { 999, NotProtectedText }, // any other code reads the same way: the run failed
+    };
+
+    [Theory]
+    [MemberData(nameof(ResultMessages))]
+    public void ResultMessage_exitCode_says_what_happened(int exitCode, string expected) =>
+        Assert.Equal(expected, ProtectDevice.ResultMessage(exitCode));
+}

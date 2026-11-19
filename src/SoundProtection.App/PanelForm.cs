@@ -46,6 +46,8 @@ internal sealed class PanelForm : Form
     private readonly Button _useHold = new();
     private readonly Label _limiter = new(); // the protection status line
     private readonly Label _warnings = new(); // under it: one line per warning
+    private readonly Button _protectButton = new(); // "Protect this device": runs the script to cover an output plugged in later
+    private readonly Label _protectResult = new(); // what that run said, under the button, only while there is something to say
     private readonly Label _apps = new();
     private readonly Label _eventsHeader = new();
     private readonly ListBox _events = new();
@@ -170,6 +172,19 @@ internal sealed class PanelForm : Form
         _warnings.Visible = false; // takes no room until there is a warning
         AddRow(root, _warnings);
 
+        // A device plugged in after the install: one button that runs the installed script elevated to cover every output
+        // that can take it, this one included. Shown only when the watched output lacks the plug-in and the switch is on.
+        _protectButton.Text = "Protect this device";
+        StyleButton(_protectButton, ColField);
+        _protectButton.Anchor = AnchorStyles.Left;
+        _protectButton.Visible = false;
+        AddRow(root, _protectButton);
+
+        Restyle(_protectResult, 9.5f, FontStyle.Regular, ColMuted);
+        _protectResult.MaximumSize = new Size(560, 0);
+        _protectResult.Visible = false; // takes no room until a run has something to say
+        AddRow(root, _protectResult);
+
         // Test tone: lets you try the cap without Zoom or YouTube.
         var toneRow = Row(new ColumnStyle(SizeType.AutoSize), new ColumnStyle(SizeType.Percent, 100f));
         _toneButton.Text = "Play test tone";
@@ -249,6 +264,7 @@ internal sealed class PanelForm : Form
             _trebleValue.Text = BandText.Value(db);
             TrebleChanged?.Invoke(db);
         };
+        _protectButton.Click += (_, _) => ProtectDeviceClick();
         _toneButton.Click += (_, _) => PlayTestTone?.Invoke();
         _useHold.Click += (_, _) => UseHoldAsCeiling?.Invoke();
         FormClosing += (_, e) =>
@@ -429,6 +445,11 @@ internal sealed class PanelForm : Form
         };
         _limiter.Text = state.StatusText;
         ShowWarnings(view.Warnings);
+
+        // The button goes by the output (covered or not) and the switch, not by the amber status: with no sound playing an
+        // uncovered output reads green, and the button must still be there. The result line hides with the button.
+        _protectButton.Visible = ProtectDevice.ShouldShow(state);
+        _protectResult.Visible = _protectButton.Visible && _protectResult.Text.Length > 0;
     }
 
     private void ShowWarnings(IReadOnlyList<string> warnings)
@@ -439,6 +460,22 @@ internal sealed class PanelForm : Form
         {
             _warnings.Visible = show;
         }
+    }
+
+    // One click, one run: the script waits on the administrator prompt and stops sound for a few seconds, so it runs off the
+    // UI thread (Task.Run, as the tray's own installer runs do) and the button stays disabled until it answers.
+    private async void ProtectDeviceClick()
+    {
+        _protectButton.Enabled = false;
+        _protectResult.Text = "Protecting\u2026 Windows will ask for permission, and sound stops for a few seconds.";
+        var exitCode = await Task.Run(ProtectDeviceRunner.Run);
+        if (IsDisposed)
+        {
+            return; // the app closed while the script was running; nothing to speak to any more
+        }
+
+        _protectButton.Enabled = true;
+        _protectResult.Text = ProtectDevice.ResultMessage(exitCode);
     }
 
     private void SetProtectionMode(bool on)
