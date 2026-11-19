@@ -116,9 +116,11 @@ defensive code).
    status: an idle-uncovered output shows green today, and the button must still appear. So: the
    button is shown whenever the watched/current output lacks the plug-in and the protection switch is
    on (the switch, not Repair, fixes Off). Clicking runs the installed script elevated:
-   `-Action Repair -Endpoints <that device>`. Repair is journal-preserving and attaches to endpoints
-   found by name — exactly an attach to a new device. If the script answers "no endpoint named" the
-   panel says plainly: "Windows offers no hook on this device, so it cannot be protected." The button
+   `-Action Repair -Endpoints All`. Repair is journal-preserving and idempotent: it attaches every
+   capable device present — the new one included — and left-attached ones are no-ops, so no device
+   name needs to travel from the panel to the script.
+   If the script answers "no capable endpoint" (exit 1), the panel says plainly: "Windows offers no
+   hook on this device, so it cannot be protected." The button
    speaks the outcome ("Protected", "Needs admin — press Yes", "Sound stopped ~5 s").
    One UAC Yes per new device; this is the accepted cost of "always works on the current output device".
 3. **Startup at install:** the same HKCU value name the tray's toggle manages
