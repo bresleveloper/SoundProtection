@@ -605,6 +605,8 @@ function Add-SpJournalRecords {
 
 # Render endpoints whose friendly name equals one of $Names (case-insensitive) and that have both
 # composite lists (,13 and ,15). Found by name every time: the GUID can change after a driver reinstall.
+# A Names entry of 'All' (case-insensitive) matches every render endpoint that passes the capability
+# filter, whatever its name.
 function Find-SpEndpoints {
     param([string]$Base, [string[]]$Names)
     $c = Get-SpConst
@@ -621,7 +623,10 @@ function Find-SpEndpoints {
                 $friendly = $pr.GetValue($c.PropName)
                 if ($friendly -isnot [string]) { continue }
                 $wanted = $false
-                foreach ($n in $Names) { if ($friendly -ieq $n) { $wanted = $true; break } }
+                foreach ($n in $Names) {
+                    if ($n -ieq 'All') { $wanted = $true; break }     # All: every endpoint that passes the capability filter
+                    if ($friendly -ieq $n) { $wanted = $true; break }
+                }
                 if (-not $wanted) { continue }
                 $fxNames = $fx.GetValueNames()
                 if (($fxNames -notcontains $c.ListLeveler) -or ($fxNames -notcontains $c.ListSafetyCap)) { continue }
@@ -1343,7 +1348,12 @@ function Invoke-SpInstallOrRepair {
     }
     $eps = @(Find-SpEndpoints -Base $Cfg.Base -Names $Cfg.Names)
     if ($eps.Count -eq 0) {
-        Write-SpLog ('No render endpoint named {0} with the composite lists ,13 and ,15 was found under {1}. Nothing was changed.' -f ($Cfg.Names -join ', '), $Cfg.Base) 'ERROR'
+        if ($Cfg.Names -ieq 'All') {
+            Write-SpLog ('No render endpoint that can take the plug-in (both composite lists ,13 and ,15) was found under {1}. Nothing was changed.' -f ($Cfg.Names -join ', '), $Cfg.Base) 'ERROR'
+        }
+        else {
+            Write-SpLog ('No render endpoint named {0} with the composite lists ,13 and ,15 was found under {1}. Nothing was changed.' -f ($Cfg.Names -join ', '), $Cfg.Base) 'ERROR'
+        }
         return
     }
     foreach ($ep in $eps) { Write-SpLog ('endpoint: {0}   id {1}   DeviceState {2}' -f $ep.Name, $ep.Id, $ep.State) }

@@ -1,0 +1,7 @@
+Setup will briefly stop all sound (about 5 seconds) and turn Sound Protection
+on for every output device that can take it on this PC (on a typical PC: the
+headphones and the speakers; HDMI/monitor outputs offer no hook and are skipped).
+
+While it is on, some copy-protected video (Netflix and the like) may play
+without sound. The desktop shortcut "Sound Protection - Undo" restores the
+original settings at any time.

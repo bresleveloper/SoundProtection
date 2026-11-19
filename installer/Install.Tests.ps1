@@ -1256,6 +1256,85 @@ try {
     }
 
     # =========================================================================================
+    # R19-R21: -Endpoints All
+    # =========================================================================================
+
+    # Creates a fake endpoint directly in the rehearsal hive. $PropListNames = the FxProperties value names it gets.
+    function Add-FakeEndpoint([string]$Name, [string[]]$PropListNames = @($ListLeveler, $ListSafety)) {
+        $id = '{' + [guid]::NewGuid().ToString().ToUpper() + '}'
+        $props = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey("$RehSub\$RenderRel\$id\Properties")
+        $props.SetValue($PropName, $Name)
+        $props.Close()
+        $fx = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey("$RehSub\$RenderRel\$id\FxProperties")
+        foreach ($n in $PropListNames) { $fx.SetValue($n, [string[]]@()) }
+        $fx.Close()
+        return $id
+    }
+
+    Run-Test 'R19 -Endpoints All Install: every capable endpoint is covered, incapable ones are skipped' {
+        New-Rehearsal
+        $usbId = Add-FakeEndpoint 'USB Test Device'
+        $halfId = Add-FakeEndpoint 'Half Hooked' @($ListLeveler)
+        $r = Invoke-Reh 'Install' @('-Endpoints', 'All')
+        Assert-Exit $r 0 'Install with -Endpoints All'
+        foreach ($id in @($usbId, $halfId)) {
+            $l13 = Get-RegState (Get-FxPath $id) $ListLeveler
+            $l15 = Get-RegState (Get-FxPath $id) $ListSafety
+            if ($l13.Exists) { Assert-Equal $l13.Kind 'MultiString' ",13 on $id keeps its kind" }
+            if ($l15.Exists) { Assert-Equal $l15.Kind 'MultiString' ",15 on $id keeps its kind" }
+        }
+        Assert-SeqEqual @([string[]](Get-RegState (Get-FxPath $usbId) $ListLeveler).Data) @($ClsidLeveler) ",13 on the USB Test Device carries exactly the Leveler CLSID"
+        Assert-SeqEqual @([string[]](Get-RegState (Get-FxPath $usbId) $ListSafety).Data) @($ClsidSafety) ",15 on the USB Test Device carries exactly the Safety Cap CLSID"
+        $half13 = Get-RegState (Get-FxPath $halfId) $ListLeveler
+        Assert-True ($half13.Exists) 'Half Hooked keeps its (empty) ,13 value'
+        Assert-Equal @([string[]]$half13.Data).Count 0 "Half Hooked's ,13 value is still empty: no CLSID was added"
+        Assert-True (-not (Get-RegState (Get-FxPath $halfId) $ListSafety).Exists) "Half Hooked got no ,15 value either"
+        foreach ($id in $script:HpIds) {
+            Assert-True ((Count-Ci @([string[]](Get-RegState (Get-FxPath $id) $ListLeveler).Data) $ClsidLeveler) -ge 1) ",13 on Headphones $id contains the Leveler CLSID"
+            Assert-True ((Count-Ci @([string[]](Get-RegState (Get-FxPath $id) $ListSafety).Data) $ClsidSafety) -ge 1) ",15 on Headphones $id contains the Safety Cap CLSID"
+        }
+    }
+
+    Run-Test 'R20 -Endpoints All Repair: a device plugged in later is attached too' {
+        New-Rehearsal
+        $halfId = Add-FakeEndpoint 'Half Hooked' @($ListLeveler)
+        Assert-Exit (Invoke-Reh 'Install' @('-Endpoints', 'All')) 0 'Install with -Endpoints All'
+        $lateId = Add-FakeEndpoint 'Late Usb'   # was not present during the Install, like a device plugged in later
+        $r = Invoke-Reh 'Repair' @('-Endpoints', 'All')
+        Assert-Exit $r 0 'Repair with -Endpoints All'
+        Assert-SeqEqual @([string[]](Get-RegState (Get-FxPath $lateId) $ListLeveler).Data) @($ClsidLeveler) ",13 on Late Usb now carries the Leveler CLSID"
+        Assert-SeqEqual @([string[]](Get-RegState (Get-FxPath $lateId) $ListSafety).Data) @($ClsidSafety) ",15 on Late Usb now carries the Safety Cap CLSID"
+        $j = Read-JournalObject
+        $fxLate = Get-FxPath $lateId
+        $recs13 = Get-Records $j $ListLeveler "*$lateId*"
+        $recs15 = Get-Records $j $ListSafety "*$lateId*"
+        Assert-Equal $recs13.Count 1 'the Repair journalled the ,13 value of Late Usb'
+        Assert-Equal $recs15.Count 1 'the Repair journalled the ,15 value of Late Usb'
+        Assert-Equal ([string]$recs13[0].key) ([string]$fxLate) 'the ,13 record is keyed under the FxProperties path of Late Usb'
+        Assert-Equal ([string]$recs15[0].key) ([string]$fxLate) 'the ,15 record is keyed under the FxProperties path of Late Usb'
+        Assert-Equal @([string[]](Get-RegState (Get-FxPath $halfId) $ListLeveler).Data).Count 0 'the Half Hooked device stays untouched: still no CLSID in its ,13'
+        Assert-True (-not (Get-RegState (Get-FxPath $halfId) $ListSafety).Exists) 'and it still has no ,15 value'
+    }
+
+    Run-Test 'R21 -Endpoints All with no capable endpoint: exits 1 and changes nothing' {
+        New-Rehearsal
+        # This test needs a hive with NO capable endpoint. On a PC that is protected right now (a real install
+        # was never undone) the rehearsal copies of the real endpoints still count as capable -- capability is
+        # about both lists being present in FxProperties, and they are, our CLSIDs inside them or not. So every
+        # copied endpoint is dropped here; only the incapable fake below stays in the hive.
+        $render = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey("$RehSub\$RenderRel", $true)
+        try {
+            foreach ($id in @($render.GetSubKeyNames())) { $render.DeleteSubKeyTree($id) }
+        }
+        finally { $render.Close() }
+        $noneId = Add-FakeEndpoint 'No Hook' @()   # no composite lists at all: nothing for the plug-in
+        $r = Invoke-Reh 'Install' @('-Endpoints', 'All')
+        Assert-Exit $r 1 'Install with -Endpoints All and no capable endpoint'
+        Assert-True ($r.Output -match 'No render endpoint') "the output says why`n$(Get-Tail $r.Output 10)"
+        Assert-True (-not (Get-RegState $AudioPath $TestKeyName).Exists) 'DisableProtectedAudioDG does not exist: the run stopped before step 7'
+    }
+
+    # =========================================================================================
     # U1-U25: helpers that a rehearsal cannot reach, against sandboxes under %TEMP%
     # =========================================================================================
     [void][IO.Directory]::CreateDirectory($UnitBox)
