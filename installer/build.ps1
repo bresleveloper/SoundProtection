@@ -100,12 +100,37 @@ if (-not (Test-Path -LiteralPath $runtime)) {
 }
 $sha = (Get-FileHash -LiteralPath $runtime -Algorithm SHA256).Hash
 
-# --- 5. summary, and the Inno compile when the .iss exists ---------------------------------------------------
+# --- 5. summary, then the Inno Setup compile -------------------------------------------------------------
 Write-Host ('PAYLOAD OK: runtime ' + $v + ' sha ' + $sha)
+
+$isccCandidates = @(
+    (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'),
+    (Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 6\ISCC.exe')
+)
+if ([string]::IsNullOrEmpty(${env:ProgramFiles(x86)})) {
+    Fail 'could not locate Program Files (x86), where Inno Setup 6 lives.'
+}
+$iscc = $isccCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+if (-not $iscc) {
+    Write-Host 'Inno Setup 6 was not found; installing it with winget...'
+    winget install --id JRSoftware.InnoSetup -e --source winget --accept-source-agreements --accept-package-agreements
+    if ($LASTEXITCODE -ne 0) { Fail ('winget install of Inno Setup 6 exited with ' + $LASTEXITCODE + '.') }
+    $iscc = $isccCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+    if (-not $iscc) {
+        Fail ('Inno Setup 6 was not found after the winget install: tried ' + ($isccCandidates -join ' and '))
+    }
+}
 $iss = Join-Path $Here 'SoundProtection.iss'
 if (-not (Test-Path -LiteralPath $iss)) {
-    Write-Host 'PAYLOAD STAGE COMPLETE — no .iss yet'
-    exit 0
+    Fail 'installer\SoundProtection.iss was not found next to build.ps1.'
 }
 
-# (the .iss compile, once installer\SoundProtection.iss exists, goes here)
+Write-Host 'compiling installer\SoundProtection.iss into out\SoundProtectionSetup.exe...'
+& $iscc ('/DRuntimeVersion=' + $v) ('/DRuntimeSha256=' + $sha) $iss
+if ($LASTEXITCODE -ne 0) { Fail ('ISCC.exe exited with ' + $LASTEXITCODE + '.') }
+$setupExe = Join-Path $Here 'out\SoundProtectionSetup.exe'
+if (-not (Test-Path -LiteralPath $setupExe)) {
+    Fail 'the compile did not produce installer\out\SoundProtectionSetup.exe.'
+}
+$mb = [math]::Round((Get-Item -LiteralPath $setupExe).Length / 1MB, 1)
+Write-Host ('SETUP OK: installer\out\SoundProtectionSetup.exe (' + $mb + ' MB, runtime ' + $v + ')')
